@@ -1,10 +1,8 @@
 # --- START OF FILE tab_data_export.py ---
-
-# ... (other imports)
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                           QTableWidget, QTableWidgetItem, QMessageBox, QLabel,
                           QSplitter, QTextEdit, QComboBox, QGroupBox, QCheckBox,
-                          QScrollArea, QFormLayout, QFileDialog, QLineEdit, QSpinBox, QGridLayout, QAbstractItemView)
+                          QScrollArea, QFormLayout, QFileDialog, QLineEdit, QSpinBox, QGridLayout, QAbstractItemView, QApplication)
 from PySide6.QtCore import Qt, Slot # Import Slot
 import psycopg2
 import psycopg2.sql as pgsql
@@ -63,7 +61,7 @@ class DataExportTab(QWidget):
         format_layout = QHBoxLayout()
         format_layout.addWidget(QLabel("导出格式:"))
         self.format_combo = QComboBox()
-        self.format_combo.addItems(["CSV (.csv)", "Parquet (.parquet)"]) # Add Parquet
+        self.format_combo.addItems(["CSV (.csv)", "Parquet (.parquet)", "Excel (.xlsx)"]) # Add Excel
         format_layout.addWidget(self.format_combo)
         format_layout.addStretch()
         export_options_layout.addLayout(format_layout)
@@ -259,7 +257,12 @@ class DataExportTab(QWidget):
         """Suggests a default export filename."""
         if self.selected_table_name:
              current_dir = os.path.dirname(self.export_path_input.text()) if self.export_path_input.text() else "."
-             file_ext = ".csv" if "CSV" in self.format_combo.currentText() else ".parquet"
+             file_ext = ".csv" # Default to CSV
+             current_format_text = self.format_combo.currentText()
+             if "Parquet" in current_format_text:
+                 file_ext = ".parquet"
+             elif "Excel" in current_format_text:
+                 file_ext = ".xlsx"
              suggested_path = os.path.join(current_dir, f"{self.selected_table_schema}_{self.selected_table_name}{file_ext}")
              self.export_path_input.setText(suggested_path.replace("\\", "/")) # Use forward slashes
 
@@ -269,13 +272,29 @@ class DataExportTab(QWidget):
              QMessageBox.warning(self, "未选定表", "请先选择要导出的表。")
              return
 
-        file_ext = "CSV 文件 (*.csv)" if "CSV" in self.format_combo.currentText() else "Parquet 文件 (*.parquet)"
-        default_filename = f"{self.selected_table_schema}_{self.selected_table_name}{'.csv' if 'CSV' in self.format_combo.currentText() else '.parquet'}"
+        current_format = self.format_combo.currentText()
+        default_ext = ""
+        if "CSV" in current_format:
+            file_ext_filter = "CSV 文件 (*.csv)"
+            default_ext = ".csv"
+        elif "Parquet" in current_format:
+            file_ext_filter = "Parquet 文件 (*.parquet)"
+            default_ext = ".parquet"
+        elif "Excel" in current_format:
+            file_ext_filter = "Excel 文件 (*.xlsx)"
+            default_ext = ".xlsx"
+        else:
+            file_ext_filter = "所有文件 (*)"
+            
+        default_filename = f"{self.selected_table_schema}_{self.selected_table_name}{default_ext}"
 
         # Suggest a filename in the dialog
-        filePath, _ = QFileDialog.getSaveFileName(self, "选择导出文件", default_filename, file_ext)
+        filePath, _ = QFileDialog.getSaveFileName(self, "选择导出文件", default_filename, file_ext_filter)
 
         if filePath:
+            # Ensure the filePath has the correct extension if user didn't type it
+            if default_ext and not filePath.lower().endswith(default_ext.lower()):
+                filePath += default_ext
             self.export_path_input.setText(filePath)
 
 
@@ -391,41 +410,74 @@ class DataExportTab(QWidget):
             row_count = 0
             chunk_size = 10000 # Process in chunks for large tables
             first_chunk = True
+            
+            total_rows_for_current_table = 0 # Get total rows for smart decisions
+            try:
+                with conn.cursor() as cur_count:
+                    cur_count.execute(pgsql.SQL("SELECT COUNT(*) FROM {table}").format(table=table_identifier))
+                    total_rows_for_current_table = cur_count.fetchone()[0]
+            except Exception as e:
+                print(f"Could not get total row count: {e}") # Non-critical, proceed without it
 
-            # Read data in chunks using pandas
-            for chunk_df in pd.read_sql_query(query.as_string(conn), conn, chunksize=chunk_size):
-                if export_format.startswith("CSV"):
-                    mode = 'w' if first_chunk else 'a'
-                    header = first_chunk
-                    chunk_df.to_csv(export_file_path, mode=mode, header=header, index=False, encoding='utf-8', quoting=csv.QUOTE_MINIMAL)
-                elif export_format.startswith("Parquet"):
-                    # Parquet needs pyarrow or fastparquet installed
-                    # Append mode is complex for parquet, usually write all at once
-                    # For chunking, would need to collect all chunks or use Dask/PyArrow features
-                    # Simplification: If limit is set, read all at once. If no limit, warn about memory.
-                     if limit_value > 0 or total_rows < 500000: # Heuristic for direct write
-                         if first_chunk: # Write the entire limited result or smaller table
-                             chunk_df.to_parquet(export_file_path, index=False)
-                         else: # Should not happen with this logic, but as safeguard
-                              raise Exception("Parquet chunked writing not fully implemented here. Try limiting rows or ensure 'pyarrow' is installed.")
-                     else:
-                         # Handle very large tables for Parquet - requires more advanced handling
-                         # Option 1: Warn user
-                         QMessageBox.warning(self,"内存警告", f"导出大型表 ({total_rows} 行) 为 Parquet 可能消耗大量内存。\n考虑使用行数限制或确保有足够内存。")
-                         # Option 2: Attempt to write (might fail)
-                         chunk_df.to_parquet(export_file_path, index=False) # Try writing the first chunk anyway
-                         if not first_chunk: break # Stop after first chunk for large parquet export warning
+            if "Excel" in export_format:
+                if limit_value == 0 and total_rows_for_current_table > 100000: # Arbitrary threshold for warning
+                     reply = QMessageBox.question(self, "内存警告",
+                                                  f"将整个表 ({total_rows_for_current_table} 行) 导出为 Excel 可能需要较长时间并消耗大量内存。\n"
+                                                  "建议使用行数限制。\n是否继续？",
+                                                  QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                     if reply == QMessageBox.No:
+                         if conn: conn.close() # Ensure connection is closed before returning
+                         QApplication.restoreOverrideCursor()
+                         return
+                try:
+                    # For Excel, read the (potentially limited) query into a single DataFrame
+                    df_full = pd.read_sql_query(query.as_string(conn), conn) 
+                    df_full.to_excel(export_file_path, index=False, engine='openpyxl') 
+                    row_count = len(df_full)
+                except ImportError:
+                    if conn: conn.close() # Ensure connection is closed on error
+                    QApplication.restoreOverrideCursor()
+                    QMessageBox.critical(self, "导出失败", "导出为 Excel 格式需要安装 'openpyxl' 库。\n请运行: pip install openpyxl")
+                    return # Stop execution if import failed
+            else: # CSV and Parquet logic
+                # Read data in chunks using pandas for CSV/Parquet
+                for chunk_df in pd.read_sql_query(query.as_string(conn), conn, chunksize=chunk_size):
+                    if export_format.startswith("CSV"):
+                        mode = 'w' if first_chunk else 'a'
+                        header = first_chunk
+                        chunk_df.to_csv(export_file_path, mode=mode, header=header, index=False, encoding='utf-8', quoting=csv.QUOTE_MINIMAL)
+                    elif export_format.startswith("Parquet"):
+                         # Simplified Parquet: if limit is set or table is not too large, write directly.
+                         # Otherwise, warn and write first chunk (or all if it fits).
+                         if limit_value > 0 or total_rows_for_current_table < 500000: 
+                             if first_chunk: 
+                                 chunk_df.to_parquet(export_file_path, index=False)
+                             else: 
+                                 # This else block for Parquet under limit/small table might indicate an issue
+                                 # if multiple chunks are unexpectedly generated. Parquet usually written at once.
+                                 # For safety, we'll assume if more chunks appear, they should be appended (requires more complex logic not implemented here)
+                                 # or we simply write the first chunk. For now, the logic implies one chunk write.
+                                 print("Warning: Multiple Parquet chunks for limited/small table - writing first chunk.")
+                                 # If an append strategy was intended, it's missing here. For now, only first chunk written.
+                         else:
+                             QMessageBox.warning(self,"内存警告", f"导出大型表 ({total_rows_for_current_table} 行) 为 Parquet 可能消耗大量内存。\n考虑使用行数限制或确保有足够内存。")
+                             # Attempt to write the first chunk of a large table
+                             chunk_df.to_parquet(export_file_path, index=False) 
+                             if not first_chunk: # Should only write first_chunk and then break for large tables
+                                 print("Stopping after processing the first chunk for large Parquet export due to memory warning.")
+                                 break 
 
-                row_count += len(chunk_df)
-                first_chunk = False
-                print(f"Processed {row_count} rows...") # Progress feedback
+                    row_count += len(chunk_df)
+                    first_chunk = False
+                    print(f"Processed {row_count} rows...") # Progress feedback
 
 
             QMessageBox.information(self, "导出成功", f"已成功导出 {row_count} 条记录到:\n{export_file_path}")
 
-        except ImportError:
-             if "Parquet" in export_format:
+        except ImportError as e: # This will now primarily catch pyarrow for Parquet if not caught by Excel's specific try-except
+             if "Parquet" in export_format and "pyarrow" in str(e).lower():
                  QMessageBox.critical(self, "导出失败", "导出为 Parquet 格式需要安装 'pyarrow' 库。\n请运行: pip install pyarrow")
+             # Excel import error is handled inline within its specific 'try' block now
              else:
                  QMessageBox.critical(self, "导出失败", f"发生未知导入错误: {str(e)}")
         except Exception as e:

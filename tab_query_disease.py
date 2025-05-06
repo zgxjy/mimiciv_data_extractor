@@ -19,11 +19,12 @@ class QueryDiseaseTab(QWidget):
         top_layout = QVBoxLayout(top_widget)
         
         # 添加说明标签
-        instruction_label = QLabel("使用下方条件组构建疾病查询条件，可以添加多个关键词和嵌套条件组")
+        instruction_label = QLabel("使用下方条件组构建疾病查询条件，可以添加多个关键词（可选择包含或排除）和嵌套条件组")
         top_layout.addWidget(instruction_label)
         
         # 添加条件组控件
         self.condition_group = ConditionGroupWidget(is_root=True)
+        self.condition_group.condition_changed.connect(self.update_button_states)
         top_layout.addWidget(self.condition_group)
         
         # 查询按钮和SQL预览
@@ -64,6 +65,18 @@ class QueryDiseaseTab(QWidget):
         splitter.setSizes([300, 500])
         
         main_layout.addWidget(splitter)
+        self.update_button_states()
+
+    def update_button_states(self):
+        """根据条件组是否有有效输入来更新按钮状态"""
+        has_input = self.condition_group.has_valid_input() 
+        self.query_btn.setEnabled(has_input)
+        self.preview_btn.setEnabled(has_input)
+        # create_table_btn 的逻辑稍微复杂，它还依赖于查询结果，
+        # 所以我们只在有输入时考虑启用，具体的启用在 execute_query 后
+        # 如果没有输入，则明确禁用 create_table_btn
+        if not has_input:
+            self.create_table_btn.setEnabled(False)
 
     def preview_sql(self):
         """预览生成的SQL语句"""
@@ -117,8 +130,10 @@ WHERE {condition}
             QMessageBox.information(self, "查询完成", f"共找到 {len(rows)} 条记录")
             
             # 启用创建表按钮
-            if len(rows) > 0:
+            if len(rows) > 0 and self.condition_group.has_valid_input(): 
                 self.create_table_btn.setEnabled(True)
+            else:
+                self.create_table_btn.setEnabled(False) # 如果没有结果或没有有效输入，则禁用
             
             conn.close()
             

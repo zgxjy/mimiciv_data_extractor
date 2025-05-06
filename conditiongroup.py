@@ -68,15 +68,25 @@ class ConditionGroupWidget(QWidget):
         kw_widget = QWidget() # Use a widget container for the layout
         kw_layout = QHBoxLayout(kw_widget)
         kw_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Add type selection (Include/Exclude)
+        kw_type_combo = QComboBox()
+        kw_type_combo.addItems(["包含", "排除"])
+        kw_type_combo.currentTextChanged.connect(self._emit_condition_changed) # Connect signal
+
         kw_input = QLineEdit()
         kw_input.setPlaceholderText("输入关键词...")
         kw_input.textChanged.connect(self._emit_condition_changed) # Connect signal
         del_btn = QPushButton("删除")
+
+        kw_layout.addWidget(QLabel("类型:"))
+        kw_layout.addWidget(kw_type_combo)
         kw_layout.addWidget(QLabel("关键词:"))
         kw_layout.addWidget(kw_input)
         kw_layout.addWidget(del_btn)
         self.items_layout.addWidget(kw_widget) # Add the container widget
-        keyword_data = {"widget": kw_widget, "input": kw_input, "layout": kw_layout}
+        # Store the type combo along with input and widget
+        keyword_data = {"widget": kw_widget, "type_combo": kw_type_combo, "input": kw_input, "layout": kw_layout}
         self.keywords.append(keyword_data)
         # Use lambda to pass the correct keyword_data to remove_keyword
         del_btn.clicked.connect(lambda: self.remove_keyword(keyword_data))
@@ -129,11 +139,16 @@ class ConditionGroupWidget(QWidget):
         conds = []
         for kw_data in self.keywords:
             kw = kw_data["input"].text().strip()
+            kw_type = kw_data["type_combo"].currentText() # Get selected type
             if kw:
                 # Basic SQL injection prevention: escape single quotes
                 kw_escaped = kw.replace("'", "''")
                 # Use ILIKE for case-insensitive matching
-                conds.append(f"{self.search_field} ILIKE '%{kw_escaped}%'")
+                if kw_type == "包含":
+                    conds.append(f"{self.search_field} ILIKE '%{kw_escaped}%'")
+                elif kw_type == "排除":
+                    conds.append(f"{self.search_field} NOT ILIKE '%{kw_escaped}%'")
+
 
         for group in self.child_groups:
             group_cond = group.get_condition()
@@ -145,5 +160,15 @@ class ConditionGroupWidget(QWidget):
 
         logic = f" {self.logic_combo.currentText()} "
         return logic.join(conds)
+
+    def has_valid_input(self):
+        """Checks if there is any valid input in this group or its children."""
+        for kw_data in self.keywords:
+            if kw_data["input"].text().strip():
+                return True
+        for group in self.child_groups:
+            if group.has_valid_input():
+                return True
+        return False
 
 # --- END OF FILE conditiongroup.py ---

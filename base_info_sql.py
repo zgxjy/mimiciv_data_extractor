@@ -106,34 +106,40 @@ WHERE height IS NOT NULL AND weight IS NOT NULL;
     sql += "\n"
     sql += "-- 死亡时间计算\n"
     sql += """
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS tsh_min NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS tsh_max NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS tsh_avg NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS t4_min NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS t4_max NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS t4_avg NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS free_t4_min NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS free_t4_max NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS free_t4_avg NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS t3_min NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS t3_max NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS t3_avg NUMERIC; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS gender character; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS dod date; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS admittime timestamp without time zone; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS dischtime timestamp without time zone; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS los_hospital numeric; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS admission_age numeric; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS race character varying; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS hospital_expire_flag smallint; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS hospstay_seq bigint; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS first_hosp_stay boolean; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS icu_intime timestamp without time zone; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS icu_outtime timestamp without time zone; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS los_icu numeric; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS icustay_seq bigint; 
+ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS first_icu_stay boolean; 
 UPDATE {table_name} af 
 SET 
-    tsh_min = t.tsh_min, 
-    tsh_max = t.tsh_max, 
-    tsh_avg = t.tsh_avg, 
-    t4_min = t.t4_min, 
-    t4_max = t.t4_max, 
-    t4_avg = t.t4_avg, 
-    free_t4_min = t.free_t4_min, 
-    free_t4_max = t.free_t4_max, 
-    free_t4_avg = t.free_t4_avg, 
-    t3_min = t.t3_min, 
-    t3_max = t.t3_max, 
-    t3_avg = t.t3_avg
-FROM mimiciv_data.thyroid_labs t 
-WHERE af.subject_id = t.subject_id AND af.stay_id = t.stay_id; 
+    gender = i.gender, 
+    dod = i.dod, 
+    admittime = i.admittime, 
+    dischtime = i.dischtime, 
+    los_hospital = i.los_hospital, 
+    admission_age = i.admission_age, 
+    race = i.race, 
+    hospital_expire_flag = i.hospital_expire_flag, 
+    hospstay_seq = i.hospstay_seq, 
+    first_hosp_stay = i.first_hosp_stay, 
+    icu_intime = i.icu_intime, 
+    icu_outtime = i.icu_outtime, 
+    los_icu = i.los_icu, 
+    icustay_seq = i.icustay_seq, 
+    first_icu_stay = i.first_icu_stay
+FROM mimiciv_derived.icustay_detail i 
+WHERE af.stay_id = i.stay_id;
 """.format(table_name=table_name)
     return sql
 
@@ -605,40 +611,7 @@ SET
 FROM mimiciv_derived.sapsii i 
 WHERE af.subject_id = i.subject_id and af.stay_id = i.stay_id;
 """.format(table_name=table_name)
-    
-    sql += "\n"
-    sql += "-- 获取患者住院第一天检验指标：甲状腺相关指标"
-    sql += "\n"
-    sql += """
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS tsh_min NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS tsh_max NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS tsh_avg NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS t4_min NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS t4_max NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS t4_avg NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS free_t4_min NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS free_t4_max NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS free_t4_avg NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS t3_min NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS t3_max NUMERIC; 
-ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS t3_avg NUMERIC; 
-UPDATE {table_name} af 
-SET 
-    tsh_min = t.tsh_min, 
-    tsh_max = t.tsh_max, 
-    tsh_avg = t.tsh_avg, 
-    t4_min = t.t4_min, 
-    t4_max = t.t4_max, 
-    t4_avg = t.t4_avg, 
-    free_t4_min = t.free_t4_min, 
-    free_t4_max = t.free_t4_max, 
-    free_t4_avg = t.free_t4_avg, 
-    t3_min = t.t3_min, 
-    t3_max = t.t3_max, 
-    t3_avg = t.t3_avg
-FROM mimiciv_data.thyroid_labs t 
-WHERE af.subject_id = t.subject_id AND af.stay_id = t.stay_id;
-""".format(table_name=table_name)
+
     
     sql += "\n"
     sql += "-- 获取患者住院:心率heart_rate_arv"
