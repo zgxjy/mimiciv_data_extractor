@@ -1,5 +1,5 @@
 from psycopg2 import sql
-
+import pandas as pd
 
 def add_demography(table_name, sql):
     sql += "-- 添加人口学信息\n"
@@ -90,6 +90,63 @@ WHERE EXISTS (
     WHERE af.subject_id = wt.subject_id AND af.stay_id = wt.stay_id 
 );
 """.format(table_name=table_name)
+
+    # 入院体重 (从 chartevents 提取入院24小时内的第一个有效体重)
+    sql += "\n"
+    sql += "-- 入院体重 (kg) - 从 chartevents 提取\n"
+    sql += """
+-- 添加缺失的列
+ALTER TABLE {table_name}
+ADD COLUMN IF NOT EXISTS admission_weight NUMERIC;
+
+-- 更新 'admission_weight' 字段 (移除多余的 WHERE EXISTS)
+UPDATE {table_name} af
+SET admission_weight = (
+    SELECT ce.valuenum
+    FROM mimiciv_icu.chartevents ce
+    JOIN mimiciv_icu.icustays ie ON ce.stay_id = ie.stay_id
+    WHERE ce.stay_id = af.stay_id
+      AND ce.itemid IN (
+          226512, -- Admission Weight (Kg)
+          224639  -- Daily Weight
+      )
+      AND ce.valuenum IS NOT NULL
+      AND ce.valuenum > 0 AND ce.valuenum < 500 -- 合理的体重范围
+      AND ce.charttime >= ie.intime AND ce.charttime <= (ie.intime + INTERVAL '24 hours')
+    ORDER BY ce.charttime ASC, ce.valuenum ASC
+    LIMIT 1
+);
+""".format(table_name=table_name)
+
+    # 出院体重 (从 chartevents 提取出院前24小时内的最后一个有效体重)
+    sql += "\n"
+    sql += "-- 出院体重 (kg) - 从 chartevents 提取\n"
+    sql += """
+-- 添加缺失的列
+ALTER TABLE {table_name}
+ADD COLUMN IF NOT EXISTS discharge_weight NUMERIC;
+
+-- 更新 'discharge_weight' 字段 (移除多余的 WHERE EXISTS)
+UPDATE {table_name} af
+SET discharge_weight = (
+    SELECT ce.valuenum
+    FROM mimiciv_icu.chartevents ce
+    JOIN mimiciv_icu.icustays ie ON ce.stay_id = ie.stay_id
+    WHERE ce.stay_id = af.stay_id
+      AND ie.outtime IS NOT NULL -- 确保有出院时间
+      AND ce.itemid IN (
+          226512, -- Admission Weight (Kg)
+          224639  -- Daily Weight
+      )
+      AND ce.valuenum IS NOT NULL
+      AND ce.valuenum > 0 AND ce.valuenum < 500 -- 合理的体重范围
+      AND ce.charttime <= ie.outtime AND ce.charttime >= (ie.outtime - INTERVAL '24 hours')
+    ORDER BY ce.charttime DESC, ce.valuenum ASC
+    LIMIT 1
+);
+""".format(table_name=table_name)
+
+
     sql +="\n"
     sql += "-- BMI\n"
     sql += """
@@ -106,40 +163,32 @@ WHERE height IS NOT NULL AND weight IS NOT NULL;
     sql += "\n"
     sql += "-- 死亡时间计算\n"
     sql += """
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS gender character; 
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS dod date; 
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS admittime timestamp without time zone; 
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS dischtime timestamp without time zone; 
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS los_hospital numeric; 
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS admission_age numeric; 
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS race character varying; 
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS hospital_expire_flag smallint; 
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS hospstay_seq bigint; 
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS first_hosp_stay boolean; 
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS icu_intime timestamp without time zone; 
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS icu_outtime timestamp without time zone; 
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS los_icu numeric; 
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS icustay_seq bigint; 
-ALTER TABLE {table_name} ADD COLUMN  IF NOT EXISTS first_icu_stay boolean; 
-UPDATE {table_name} af 
+-- 添加缺失的列，如果尚不存在
+ALTER TABLE {table_name} 
+ADD COLUMN IF NOT EXISTS icu_los_dod_days NUMERIC;
+
+ALTER TABLE {table_name} 
+ADD COLUMN IF NOT EXISTS hospital_los_dod_days NUMERIC;
+
+ALTER TABLE {table_name} 
+ADD COLUMN IF NOT EXISTS time_to_death_days NUMERIC;
+
+-- 更新 'icu_los_dod_days', 'hospital_los_dod_days', 和 'time_to_death_days' 字段
+UPDATE {table_name} af
 SET 
-    gender = i.gender, 
-    dod = i.dod, 
-    admittime = i.admittime, 
-    dischtime = i.dischtime, 
-    los_hospital = i.los_hospital, 
-    admission_age = i.admission_age, 
-    race = i.race, 
-    hospital_expire_flag = i.hospital_expire_flag, 
-    hospstay_seq = i.hospstay_seq, 
-    first_hosp_stay = i.first_hosp_stay, 
-    icu_intime = i.icu_intime, 
-    icu_outtime = i.icu_outtime, 
-    los_icu = i.los_icu, 
-    icustay_seq = i.icustay_seq, 
-    first_icu_stay = i.first_icu_stay
-FROM mimiciv_derived.icustay_detail i 
-WHERE af.stay_id = i.stay_id;
+    icu_los_dod_days = CASE -- ICU出院时间到死亡时间的天数
+        WHEN DATE_PART('day', dod - icu_outtime) < 0 THEN 0
+        ELSE DATE_PART('day', dod - icu_outtime)
+    END,
+    hospital_los_dod_days = CASE -- 出院时间到死亡时间的天数
+        WHEN DATE_PART('day', dod - dischtime) < 0 THEN 0
+        ELSE DATE_PART('day', dod - dischtime)
+    END,
+    time_to_death_days = CASE -- 入院时间到死亡时间的天数
+        WHEN DATE_PART('day', dod - admittime) < 0 THEN 0
+        ELSE DATE_PART('day', dod - admittime)
+    END
+WHERE dod IS NOT NULL;
 """.format(table_name=table_name)
     return sql
 
@@ -1160,46 +1209,105 @@ WHERE
 
 
 
-def add_past_diagnostic(table_name,sql):
-    sql += "\n"
-    sql += "-- 获取患者过往疾病诊断史"
-    sql += "\n"
-    sql += """
--- Step 1: Add the new columns for prior diagnosis, icd codes, and long titles of anxiolytic
-    ALTER TABLE {table_name} 
-    ADD COLUMN IF NOT EXISTS prior_anxiolytic INT DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS prior_anxiolytic_icd_codes TEXT DEFAULT '',
-    ADD COLUMN IF NOT EXISTS prior_anxiolytic_long_titles TEXT DEFAULT '';
+def add_past_diagnostic(table_name, sql, conn, diag_category_keywords_list):
+    """
+    为多种疾病类别添加既往诊断史到目标表中。
+    此函数会查询数据库以获取每个疾病关键词对应的ICD代码。
 
-    -- Step 2: Update the new columns based on prior diagnosis records
-    WITH temp_diag AS (
-        SELECT 
-            d.subject_id,
-            STRING_AGG(DISTINCT d.icd_code, ',') AS icd_codes, -- 以逗号连接ICD代码
-            STRING_AGG(DISTINCT i.long_title, '; ') AS long_titles -- 以分号连接long_title
-        FROM 
-            mimiciv_hosp.diagnoses_icd AS d
-        JOIN 
-            mimiciv_hosp.d_icd_diagnoses AS i 
-            ON d.icd_code = i.icd_code
-        JOIN 
-            {table_name} AS a 
-            ON d.subject_id = a.subject_id
-        WHERE 
-            d.icd_code IN ('30410  ', '30411  ', '30412  ', '30413  ', '30540  ', '30541  ', '30542  ', '30543  ', 'F13    ', 'F131   ', 'F1310  ', 'F1311  ', 'F1312  ', 'F13120 ', 'F13121 ', 'F13129 ', 'F1313  ', 'F13130 ', 'F13131 ', 'F13132 ', 'F13139 ', 'F1314  ', 'F1315  ', 'F13150 ', 'F13151 ', 'F13159 ', 'F1318  ', 'F13180 ', 'F13181 ', 'F13182 ', 'F13188 ', 'F1319  ', 'F132   ', 'F1320  ', 'F1321  ', 'F1322  ', 'F13220 ', 'F13221 ', 'F13229 ', 'F1323  ', 'F13230 ', 'F13231 ', 'F13232 ', 'F13239 ', 'F1324  ', 'F1325  ', 'F13250 ', 'F13251 ', 'F13259 ', 'F1326  ', 'F1327  ', 'F1328  ', 'F13280 ', 'F13281 ', 'F13282 ', 'F13288 ', 'F1329  ', 'F139   ', 'F1390  ', 'F1391  ', 'F1392  ', 'F13920 ', 'F13921 ', 'F13929 ', 'F1393  ', 'F13930 ', 'F13931 ', 'F13932 ', 'F13939 ', 'F1394  ', 'F1395  ', 'F13950 ', 'F13951 ', 'F13959 ', 'F1396  ', 'F1397  ', 'F1398  ', 'F13980 ', 'F13981 ', 'F13982 ', 'F13988 ', 'F1399  ', 'P041A  ')
-            AND d.seq_num < a.seq_num
-        GROUP BY 
-            d.subject_id
-    )
-    UPDATE 
-        {table_name} AS a
-    SET 
-        prior_anxiolytic = 1,
-        prior_anxiolytic_icd_codes = t.icd_codes,
-        prior_anxiolytic_long_titles = t.long_titles
+    Args:
+        table_name (str): 目标数据表的名称。
+        sql (str): 用于累积SQL语句的字符串。
+        conn: 数据库连接对象 (例如, psycopg2 connection object)，用于执行查询。
+        diag_category_keywords_list (list): 疾病关键词字符串列表 (例如, ['sleep apnea', 'insomnia'])。
+
+    Returns:
+        str: 附加了新的既往诊断提取SQL语句的字符串。
+    """
+    sql += "\n"
+    sql += "-- 获取患者多种既往疾病诊断史 (ICD码在函数内动态查询) --\n"
+
+    for keyword in diag_category_keywords_list:
+        if not keyword or not isinstance(keyword, str):
+            # print(f"Skipping invalid keyword: {keyword}") # 可选日志
+            continue
+
+        # 基于关键词生成用于列名和注释的名称
+        category_key = keyword.strip().lower().replace(' ', '_') # 例如: 'sleep_apnea'
+        display_name = keyword.strip().capitalize() # 例如: 'Sleep apnea'
+
+        # 查询当前关键词对应的ICD代码
+        icd_codes_list = []
+        try:
+            # 使用 DISTINCT 和 TRIM 确保ICD代码的唯一性和清洁性
+            icd_query = f"""
+            SELECT DISTINCT TRIM(icd_code) AS icd_code 
+            FROM mimiciv_hosp.d_icd_diagnoses 
+            WHERE LOWER(long_title) LIKE '%{keyword.strip().lower()}%';
+            """
+            icd_df = pd.read_sql_query(icd_query, conn)
+            # 过滤掉空或None的ICD代码
+            icd_codes_list = [code for code in icd_df['icd_code'].tolist() if code and str(code).strip()]
+        except Exception as e:
+            print(f"Error fetching ICD codes for '{keyword}': {e}") # 记录错误
+            # 根据需要，可以选择跳过此类别或采取其他错误处理措施
+
+        if not icd_codes_list:
+            # print(f"No ICD codes found for category '{display_name}', skipping.") # 可选日志
+            continue
+
+        prior_col_name = f"prior_{category_key}"
+        icd_col_name = f"{prior_col_name}_icd_codes"
+        title_col_name = f"{prior_col_name}_long_titles"
+
+        formatted_icd_codes_str = ", ".join([f"'{str(code).strip()}'" for code in icd_codes_list])
+        if not formatted_icd_codes_str: # 双重检查，以防icd_codes_list只包含空字符串
+            # print(f"Skipping category {display_name} due to empty formatted ICD codes string after processing.")
+            continue
+
+        sql += "\n"
+        sql += f"-- ### Processing: Prior Diagnosis for {display_name} (using dynamically fetched ICDs) ### --\n"
+        
+        category_sql_block = f"""
+-- Step 1: Add columns for prior {display_name} diagnosis
+ALTER TABLE {table_name}
+ADD COLUMN IF NOT EXISTS {prior_col_name} INT DEFAULT 0,
+ADD COLUMN IF NOT EXISTS {icd_col_name} TEXT DEFAULT NULL,
+ADD COLUMN IF NOT EXISTS {title_col_name} TEXT DEFAULT NULL;
+
+-- Step 2: Update columns based on prior {display_name} diagnosis records
+WITH prior_diagnoses_for_{category_key} AS (
+    SELECT 
+        pat.subject_id,
+        STRING_AGG(DISTINCT TRIM(d.icd_code), ', ') AS aggregated_icd_codes,
+        STRING_AGG(DISTINCT TRIM(diag_desc.long_title), '; ') AS aggregated_long_titles
     FROM 
-        temp_diag AS t
+        mimiciv_hosp.patients pat
+    JOIN
+        mimiciv_hosp.admissions adm ON pat.subject_id = adm.subject_id
+    JOIN
+        mimiciv_hosp.diagnoses_icd d ON adm.hadm_id = d.hadm_id
+    JOIN 
+        mimiciv_hosp.d_icd_diagnoses diag_desc ON TRIM(d.icd_code) = TRIM(diag_desc.icd_code)
+    JOIN 
+        {table_name} current_event ON pat.subject_id = current_event.subject_id
     WHERE 
-        a.subject_id = t.subject_id;
-""".format(table_name=table_name)
+        TRIM(d.icd_code) IN ({formatted_icd_codes_str})
+        AND adm.admittime < current_event.icu_intime 
+        AND current_event.icu_intime IS NOT NULL
+    GROUP BY 
+        pat.subject_id
+)
+UPDATE 
+    {table_name} AS target_table_alias
+SET 
+    {prior_col_name} = 1,
+    {icd_col_name} = p_diag.aggregated_icd_codes,
+    {title_col_name} = p_diag.aggregated_long_titles
+FROM 
+    prior_diagnoses_for_{category_key} AS p_diag
+WHERE 
+    target_table_alias.subject_id = p_diag.subject_id;
+"""
+        sql += category_sql_block
+
     return sql
