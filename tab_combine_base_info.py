@@ -10,15 +10,30 @@ import time
 import pandas as pd # 需要 pandas 来执行 ICD 查询
 from base_info_sql import *
 
-# ... (SQLWorker 类保持不变) ...
+
 class SQLWorker(QObject):
-    """SQL执行工作线程类"""
+    """
+    SQL执行工作线程类。
+    用于在独立线程中执行SQL批处理，避免阻塞主界面。
+    信号：
+        finished(list, list): 执行完成，返回列信息和数据行。
+        error(str): 执行过程中发生错误。
+        progress(int, int): 进度更新。
+        log(str): 日志信息。
+    """
     finished = Signal(list, list)
     error = Signal(str)
     progress = Signal(int, int)
     log = Signal(str)
 
     def __init__(self, sql_to_execute, db_params, table_name):
+        """
+        初始化SQLWorker。
+        参数：
+            sql_to_execute: 待执行的SQL语句字符串。
+            db_params: 数据库连接参数（dict）。
+            table_name: 目标表名。
+        """
         super().__init__()
         self.sql_to_execute = sql_to_execute
         self.db_params = db_params
@@ -26,11 +41,17 @@ class SQLWorker(QObject):
         self.is_cancelled = False
 
     def cancel(self):
+        """
+        请求取消SQL执行。
+        """
         self.log.emit("SQL 执行被请求取消...")
         self.is_cancelled = True
 
     def run(self):
-        """执行SQL操作"""
+        """
+        主执行逻辑：连接数据库，依次执行SQL语句，处理进度、异常和日志。
+        结束后获取表结构和部分数据预览，发射finished信号。
+        """
         conn_extract = None
         try:
             self.log.emit(f"准备为表 '{self.table_name}' 执行SQL批处理...")
@@ -143,7 +164,13 @@ class SQLWorker(QObject):
                 conn_extract.close()
 
     def _parse_sql(self, sql):
-        """将SQL脚本分割成多个语句 (改进版)"""
+        """
+        将SQL脚本分割成多个独立可执行的语句（支持多行、注释、空行）。
+        参数：
+            sql: 原始SQL脚本字符串。
+        返回：
+            list，每个元素为一条完整的SQL语句（含必要换行和注释）。
+        """
         _statements_from_original_parser = []
         _current_statement_orig = ""
         _original_lines = sql.split('\n')
@@ -162,6 +189,7 @@ class SQLWorker(QObject):
 
             _current_statement_orig += line 
             if stripped_line.endswith(';'):
+                # 检查语句是否为纯注释或空
                 non_comment_part = ""
                 for sub_line in _current_statement_orig.split('\n'): 
                     comment_start_index = sub_line.find('--')
@@ -187,6 +215,7 @@ class SQLWorker(QObject):
             if non_comment_part.strip():
                 _statements_from_original_parser.append(_current_statement_orig.strip())
         
+        # 过滤掉纯注释或空语句
         final_statements = []
         for s in _statements_from_original_parser:
             is_only_comment_or_empty = True
@@ -203,14 +232,24 @@ class SQLWorker(QObject):
 
 
 class BaseInfoDataExtractionTab(QWidget):
-    # ... (init, init_ui, on_db_connected, refresh_tables, on_table_selected 不变) ...
+    """
+    基础数据提取Tab页主类。
+    用于MIMIC-IV数据的表选择、选项设定、SQL生成与执行、进度反馈和结果预览。
+    """
     def __init__(self, get_db_params_func, parent=None):
+        """
+        初始化Tab。
+        参数：
+            get_db_params_func: 获取数据库参数的函数。
+            parent: Qt父对象。
+        """
         super().__init__(parent)
         self.get_db_params = get_db_params_func
         self.selected_table = None
         self.sql_confirmed = False
         self.worker = None
         self.worker_thread = None
+        # 诊断类别关键词，用于ICD查询
         self.DIAG_CATEGORY_KEYWORDS = [
             "sleep apnea", "insomnia", "depressive", "anxiety", "anxiolytic",
             "diabetes", "hypertension", "myocardial infarction", "stroke", "asthma", "copd"
@@ -218,15 +257,22 @@ class BaseInfoDataExtractionTab(QWidget):
         self.init_ui()
 
     def init_ui(self):
+        """
+        构建Tab的界面，包括表选择、数据选项、执行进度、SQL预览、操作按钮和结果表。
+        """
+        # 主体布局
         main_layout = QVBoxLayout(self)
         
+        # 顶部控件
         top_widget = QWidget()
         top_layout = QVBoxLayout(top_widget)
         
+        # 操作说明
         instruction_label = QLabel("从数据库中选择病种表，并添加基础数据。\n请先点击SQL确认预览以生成并检查SQL语句，然后才能点击提取基础数据。")
         instruction_label.setWordWrap(True)
         top_layout.addWidget(instruction_label)
         
+        # 表选择区
         table_select_layout = QHBoxLayout()
         table_select_layout.addWidget(QLabel("选择病种表:"))
         self.table_combo = QComboBox()
@@ -234,11 +280,13 @@ class BaseInfoDataExtractionTab(QWidget):
         self.table_combo.currentIndexChanged.connect(self.on_table_selected)
         table_select_layout.addWidget(self.table_combo)
         
+        # 刷新表列表按钮
         self.refresh_btn = QPushButton("刷新表列表")
         self.refresh_btn.clicked.connect(self.refresh_tables)
         table_select_layout.addWidget(self.refresh_btn)
         top_layout.addLayout(table_select_layout)
         
+        # 数据提取选项区
         options_group = QGroupBox("数据提取选项")
         options_layout = QVBoxLayout(options_group)
         scroll_area = QScrollArea()
@@ -246,6 +294,7 @@ class BaseInfoDataExtractionTab(QWidget):
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
 
+        # 各类数据复选框
         self.cb_demography = QCheckBox("住院及人口学信息")
         self.cb_demography.setChecked(True); scroll_layout.addWidget(self.cb_demography)
         self.cb_antecedent = QCheckBox("患者既往史 (Charlson)")
@@ -262,16 +311,18 @@ class BaseInfoDataExtractionTab(QWidget):
         self.cb_surgery.setChecked(True); scroll_layout.addWidget(self.cb_surgery)
         self.cb_past_disease = QCheckBox("患者既往病史 (自定义ICD)")
         self.cb_past_disease.setChecked(True); scroll_layout.addWidget(self.cb_past_disease)
-
+        
+        # 选项变更信号绑定
         for cb in [self.cb_demography, self.cb_antecedent, self.cb_vital_sign, 
                    self.cb_blood_info, self.cb_cardiovascular_lab, self.cb_medications, 
                    self.cb_surgery, self.cb_past_disease]:
             cb.stateChanged.connect(self.on_options_changed)
-
+        
         scroll_area.setWidget(scroll_content)
         options_layout.addWidget(scroll_area)
         top_layout.addWidget(options_group)
         
+        # SQL执行状态区
         self.execution_status_group = QGroupBox("SQL执行状态")
         execution_status_layout = QVBoxLayout(self.execution_status_group)
         self.execution_progress = QProgressBar()
@@ -283,11 +334,13 @@ class BaseInfoDataExtractionTab(QWidget):
         self.execution_status_group.setVisible(False)
         top_layout.addWidget(self.execution_status_group)
         
+        # SQL预览区
         top_layout.addWidget(QLabel("SQL预览:"))
         self.sql_preview = QTextEdit()
         self.sql_preview.setReadOnly(True); self.sql_preview.setMaximumHeight(200)
         top_layout.addWidget(self.sql_preview)
 
+        # 操作按钮区
         buttons_layout = QHBoxLayout()
         self.confirm_sql_btn = QPushButton("SQL确认预览")
         self.confirm_sql_btn.clicked.connect(self.handle_confirm_sql_preview)
@@ -306,6 +359,7 @@ class BaseInfoDataExtractionTab(QWidget):
         
         top_layout.addLayout(buttons_layout)
         
+        # 主体分割器，分为操作区和结果区
         splitter = QSplitter(Qt.Vertical)
         splitter.addWidget(top_widget)
         

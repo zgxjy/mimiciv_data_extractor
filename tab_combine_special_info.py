@@ -13,18 +13,33 @@ import pandas as pd # Import Pandas for preview
 from conditiongroup import ConditionGroupWidget
 
 class SpecialInfoDataExtractionTab(QWidget):
+    """
+    特殊信息数据提取Tab页主类。
+    用于MIMIC-IV数据库中，针对特定病种表，实现灵活选择来源（化验、用药、操作、诊断）、筛选项目、定义提取逻辑、自动生成列名，并支持SQL预览、数据预览和一键合并入目标表。
+    信号：
+        request_preview_signal(str, str): 请求主导出Tab刷新预览。
+    """
     request_preview_signal = Signal(str, str) # Signal to request preview in export tab
 
     def __init__(self, get_db_params_func, parent=None):
+        """
+        初始化Tab。
+        参数：
+            get_db_params_func: 获取数据库参数的函数。
+            parent: Qt父对象。
+        """
         super().__init__(parent)
         self.get_db_params = get_db_params_func
         self.selected_cohort_table = None
-        # No longer need self.selected_source_items here, get directly from list widget
-        self.db_conn = None # Store connection for reuse
-        self.db_cursor = None # Store cursor
-        self.init_ui() # Initialize UI elements first
+        # 不再需要 self.selected_source_items，直接从list widget获取
+        self.db_conn = None # 复用数据库连接
+        self.db_cursor = None # 复用游标
+        self.init_ui() # 初始化界面控件
 
     def init_ui(self):
+        """
+        初始化界面控件。
+        """
         main_layout = QVBoxLayout(self)
         splitter = QSplitter(Qt.Vertical)
         main_layout.addWidget(splitter)
@@ -206,6 +221,9 @@ class SpecialInfoDataExtractionTab(QWidget):
     # --- Helper Methods ---
 
     def _connect_db(self):
+        """
+        建立或返回现有的数据库连接。
+        """
         # ... (code remains the same) ...
         """Establishes or returns existing DB connection."""
         if self.db_conn and self.db_conn.closed == 0:
