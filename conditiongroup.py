@@ -22,10 +22,10 @@ class ConditionGroupWidget(QWidget):
 
         if not self.is_root:
             group_box = QGroupBox()
-            self.layout = QVBoxLayout(group_box)
+            self.layout = QVBoxLayout(group_box) # type: ignore
             main_layout.addWidget(group_box)
         else:
-            self.layout = main_layout
+            self.layout = main_layout # type: ignore
 
         logic_layout = QHBoxLayout()
         self.logic_combo = QComboBox()
@@ -47,8 +47,8 @@ class ConditionGroupWidget(QWidget):
         self.layout.addLayout(logic_layout)
 
         separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
-        separator.setFrameShadow(QFrame.Sunken)
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
         self.layout.addWidget(separator)
 
         self.items_layout = QVBoxLayout()
@@ -57,8 +57,8 @@ class ConditionGroupWidget(QWidget):
         self.add_keyword_btn.clicked.connect(self.add_keyword)
         self.add_group_btn.clicked.connect(self.add_group)
 
-        self.keywords = []
-        self.child_groups = []
+        self.keywords = [] # type: list[dict]
+        self.child_groups = [] # type: list[ConditionGroupWidget]
 
         if self.is_root:
             self.add_keyword()
@@ -91,7 +91,6 @@ class ConditionGroupWidget(QWidget):
     def remove_keyword(self, keyword_data):
         if keyword_data in self.keywords:
             keyword_data["widget"].deleteLater()
-            # self.items_layout.removeWidget(keyword_data["widget"]) # QWidget.deleteLater() 应该会处理布局移除
             self.keywords.remove(keyword_data)
             self._emit_condition_changed()
 
@@ -102,7 +101,7 @@ class ConditionGroupWidget(QWidget):
         self.items_layout.addWidget(group)
         self._emit_condition_changed()
 
-    def remove_child_group(self, group):
+    def remove_child_group(self, group: 'ConditionGroupWidget'):
          if group in self.child_groups:
             self.child_groups.remove(group)
             # group.deleteLater() # 子组自己会调用 delete_self，其中包含 deleteLater
@@ -135,48 +134,37 @@ class ConditionGroupWidget(QWidget):
                    params_list: List of parameters for the placeholders.
                    Returns ("", []) if no valid conditions.
         """
-        # self.search_field 仍然假设是一个程序控制的、安全的列名
-        # 例如 "long_title", "label", "drug"
-        # 如果 search_field 也需要动态和安全处理，需要 psycopg2.sql.Identifier(self.search_field)
-        # 但这里我们简化，假设它是安全的。
-
-        cond_parts = []  # List of SQL template parts
-        params = []      # List of parameters
+        cond_parts = []
+        params = []
 
         for kw_data in self.keywords:
             kw_text = kw_data["input"].text().strip()
             kw_type = kw_data["type_combo"].currentText()
             if kw_text:
-                # search_field 必须是安全的，不能来自用户输入
-                # 如果 search_field 可能包含特殊字符或SQL关键字，应该用 Identifier 包装
-                # sql_field_part = psql.Identifier(self.search_field).as_string(cursor_or_conn_obj)
-                # 但在这里，我们假设 self.search_field 是一个简单的、有效的列名
-                
-                # 构造 ILIKE 的参数时，SQL 通配符 '%' 应该包含在参数值中
-                param_value = f"%{kw_text}%" 
-                
+                param_value = f"%{kw_text}%"
+                # Here, self.search_field is directly embedded. This is safe if self.search_field
+                # is a programmatically controlled, known-safe column name.
+                # If self.search_field could be arbitrary or user-influenced,
+                # it would need to be escaped using psycopg2.sql.Identifier.
+                # For this application's context, it's assumed to be safe.
                 if kw_type == "包含":
-                    # 注意：这里直接嵌入 self.search_field 是因为它是程序定义的，不是用户输入
                     cond_parts.append(f"{self.search_field} ILIKE %s")
                 elif kw_type == "排除":
                     cond_parts.append(f"{self.search_field} NOT ILIKE %s")
-                
                 params.append(param_value)
 
         for group in self.child_groups:
             group_sql_template, group_params = group.get_condition()
-            if group_sql_template: # 检查是否有有效的子条件
+            if group_sql_template:
                 cond_parts.append(f"({group_sql_template})")
                 params.extend(group_params)
 
         if not cond_parts:
-            return "", [] # 没有条件
+            return "", []
 
-        logic_operator = f" {self.logic_combo.currentText()} " # " AND " 或 " OR "
-        
-        # 将所有部分用逻辑操作符连接起来
+        logic_operator = f" {self.logic_combo.currentText()} "
         full_sql_template = logic_operator.join(cond_parts)
-        
+
         return full_sql_template, params
 
     def has_valid_input(self):

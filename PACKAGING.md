@@ -1,3 +1,4 @@
+@ -0,0 +1,79 @@
 # 打包 MedicalDataExtractor 应用指南
 
 本文档介绍了使用 PyInstaller 将 MedicalDataExtractor Python 应用打包成 Windows 独立可执行文件 (.exe) 的步骤。遵循这些步骤可以确保一个干净的构建环境，避免与系统已安装的其他 Python 环境（如 Anaconda）产生冲突。
