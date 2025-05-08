@@ -1209,64 +1209,53 @@ WHERE
 
 
 
-def add_past_diagnostic(table_name, sql, conn, diag_category_keywords_list):
+def add_past_diagnostic(table_name, sql, past_diagnoses_data):
     """
-    为多种疾病类别添加既往诊断史到目标表中。
-    此函数会查询数据库以获取每个疾病关键词对应的ICD代码。
+    为多种疾病类别添加既往诊断史到目标表中 (使用预查询的ICD代码)。
 
     Args:
-        table_name (str): 目标数据表的名称。
+        table_name (str): 目标数据表的名称 (应包含 schema, e.g., 'mimiciv_data.my_table').
         sql (str): 用于累积SQL语句的字符串。
-        conn: 数据库连接对象 (例如, psycopg2 connection object)，用于执行查询。
-        diag_category_keywords_list (list): 疾病关键词字符串列表 (例如, ['sleep apnea', 'insomnia'])。
+        past_diagnoses_data (dict): 一个字典，其键是 category_key (如 'sleep_apnea')，
+                                    值是与该类别关联的 ICD 代码列表 (list of strings)。
+                                    例如: {'sleep_apnea': ['G4733', '78057'], 'diabetes': [...]}
 
     Returns:
         str: 附加了新的既往诊断提取SQL语句的字符串。
     """
     sql += "\n"
-    sql += "-- 获取患者多种既往疾病诊断史 (ICD码在函数内动态查询) --\n"
+    sql += "-- 获取患者多种既往疾病诊断史 (使用预查询的ICD码) --\n"
 
-    for keyword in diag_category_keywords_list:
-        if not keyword or not isinstance(keyword, str):
-            # print(f"Skipping invalid keyword: {keyword}") # 可选日志
+    if not past_diagnoses_data:
+        sql += "-- 未提供既往疾病诊断数据或未找到相关ICD码。--\n"
+        return sql
+
+    # 遍历预先获取的疾病类别和对应的ICD代码
+    for category_key, icd_codes_list in past_diagnoses_data.items():
+        if not icd_codes_list: # 如果某个类别没有找到ICD码，跳过
+            sql += f"-- 未找到类别 '{category_key}' 的ICD码，跳过。--\n"
             continue
 
-        # 基于关键词生成用于列名和注释的名称
-        category_key = keyword.strip().lower().replace(' ', '_') # 例如: 'sleep_apnea'
-        display_name = keyword.strip().capitalize() # 例如: 'Sleep apnea'
-
-        # 查询当前关键词对应的ICD代码
-        icd_codes_list = []
-        try:
-            # 使用 DISTINCT 和 TRIM 确保ICD代码的唯一性和清洁性
-            icd_query = f"""
-            SELECT DISTINCT TRIM(icd_code) AS icd_code 
-            FROM mimiciv_hosp.d_icd_diagnoses 
-            WHERE LOWER(long_title) LIKE '%{keyword.strip().lower()}%';
-            """
-            icd_df = pd.read_sql_query(icd_query, conn)
-            # 过滤掉空或None的ICD代码
-            icd_codes_list = [code for code in icd_df['icd_code'].tolist() if code and str(code).strip()]
-        except Exception as e:
-            print(f"Error fetching ICD codes for '{keyword}': {e}") # 记录错误
-            # 根据需要，可以选择跳过此类别或采取其他错误处理措施
-
-        if not icd_codes_list:
-            # print(f"No ICD codes found for category '{display_name}', skipping.") # 可选日志
-            continue
+        # display_name 可以从 category_key 反推，或者也包含在数据结构中
+        # 这里简单处理，将下划线换回空格并首字母大写
+        display_name = category_key.replace('_', ' ').capitalize()
 
         prior_col_name = f"prior_{category_key}"
         icd_col_name = f"{prior_col_name}_icd_codes"
         title_col_name = f"{prior_col_name}_long_titles"
 
+        # --- SQL 生成逻辑核心不变 ---
+        # 格式化 ICD 代码列表用于 SQL IN 子句
+        # 确保每个代码都被正确引用（加单引号）
         formatted_icd_codes_str = ", ".join([f"'{str(code).strip()}'" for code in icd_codes_list])
-        if not formatted_icd_codes_str: # 双重检查，以防icd_codes_list只包含空字符串
-            # print(f"Skipping category {display_name} due to empty formatted ICD codes string after processing.")
+        if not formatted_icd_codes_str: # 理论上不会发生，因为我们检查了 icd_codes_list 非空
+            sql += f"-- 类别 '{display_name}' 的ICD码列表格式化后为空，跳过。--\n"
             continue
 
         sql += "\n"
-        sql += f"-- ### Processing: Prior Diagnosis for {display_name} (using dynamically fetched ICDs) ### --\n"
-        
+        sql += f"-- ### Processing: Prior Diagnosis for {display_name} (using pre-fetched ICDs) ### --\n"
+
+        # SQL 语句块保持不变，只是数据来源变了
         category_sql_block = f"""
 -- Step 1: Add columns for prior {display_name} diagnosis
 ALTER TABLE {table_name}
@@ -1276,38 +1265,39 @@ ADD COLUMN IF NOT EXISTS {title_col_name} TEXT DEFAULT NULL;
 
 -- Step 2: Update columns based on prior {display_name} diagnosis records
 WITH prior_diagnoses_for_{category_key} AS (
-    SELECT 
+    SELECT
         pat.subject_id,
         STRING_AGG(DISTINCT TRIM(d.icd_code), ', ') AS aggregated_icd_codes,
         STRING_AGG(DISTINCT TRIM(diag_desc.long_title), '; ') AS aggregated_long_titles
-    FROM 
+    FROM
         mimiciv_hosp.patients pat
     JOIN
         mimiciv_hosp.admissions adm ON pat.subject_id = adm.subject_id
     JOIN
         mimiciv_hosp.diagnoses_icd d ON adm.hadm_id = d.hadm_id
-    JOIN 
+    JOIN
         mimiciv_hosp.d_icd_diagnoses diag_desc ON TRIM(d.icd_code) = TRIM(diag_desc.icd_code)
-    JOIN 
+    JOIN
         {table_name} current_event ON pat.subject_id = current_event.subject_id
-    WHERE 
+    WHERE
         TRIM(d.icd_code) IN ({formatted_icd_codes_str})
-        AND adm.admittime < current_event.icu_intime 
+        AND adm.admittime < current_event.icu_intime -- 使用 ICU 入住时间作为参考点
         AND current_event.icu_intime IS NOT NULL
-    GROUP BY 
+    GROUP BY
         pat.subject_id
 )
-UPDATE 
+UPDATE
     {table_name} AS target_table_alias
-SET 
+SET
     {prior_col_name} = 1,
     {icd_col_name} = p_diag.aggregated_icd_codes,
     {title_col_name} = p_diag.aggregated_long_titles
-FROM 
+FROM
     prior_diagnoses_for_{category_key} AS p_diag
-WHERE 
+WHERE
     target_table_alias.subject_id = p_diag.subject_id;
 """
         sql += category_sql_block
+        # --- SQL 生成逻辑核心结束 ---
 
     return sql
