@@ -1,4 +1,5 @@
 # --- START OF FILE base_info_sql.py ---
+# --- START OF FILE base_info_sql.py ---
 
 from psycopg2 import sql
 import pandas as pd
@@ -11,47 +12,65 @@ def add_demography(table_name, sql_accumulator):
     """
     Returns:
         tuple: (list_of_column_definition_strings, update_sql_string)
+    The target table (from tab_query_disease) is assumed to already have:
+    subject_id, hadm_id, stay_id, admittime, dischtime, icu_intime, icu_outtime, los_icu_hours.
+    This function adds other demographic info from icustay_detail, including its sequence and LOS columns
+    for alignment/verification, and calculates specific weights/bmi.
     """
     col_defs = [
-        # ... (其他列定义不变) ...
-        col_def("gender", "character"), col_def("dod", "date"),
-        col_def("admittime", "timestamp without time zone"), col_def("dischtime", "timestamp without time zone"),
-        col_def("los_hospital", "numeric"), col_def("admission_age", "numeric"),
-        col_def("race", "character varying"), col_def("hospital_expire_flag", "smallint"),
-        col_def("hospstay_seq", "bigint"), col_def("first_hosp_stay", "boolean"),
-        col_def("icu_intime", "timestamp without time zone"), col_def("icu_outtime", "timestamp without time zone"),
-        col_def("los_icu", "numeric"), col_def("icustay_seq", "bigint"),
-        col_def("first_icu_stay", "boolean"),
+        col_def("gender", "character"),
+        col_def("dod", "date"),
+        # Core timestamps admittime, dischtime, icu_intime, icu_outtime are already in the target table
+        # los_icu_hours is also already in the target table (calculated in hours)
+
+        col_def("los_hospital", "numeric"),         # Hospital LOS from icustay_detail (days)
+        col_def("admission_age", "numeric"),      # Age at hospital admission from icustay_detail
+        col_def("race", "character varying"),
+        col_def("hospital_expire_flag", "smallint"),# In-hospital mortality
+
+        # Sequence and first-stay flags from icustay_detail for alignment/verification
+        col_def("hospstay_seq", "bigint"),          # Sequence of this hospital stay for the patient
+        col_def("first_hosp_stay", "boolean"),      # Is this the patient's first hospital stay overall?
+        col_def("icustay_seq", "bigint"),           # Sequence of this ICU stay within this hospital admission
+        col_def("first_icu_stay", "boolean"),       # Is this ICU stay the first for this hadm_id?
+        col_def("los_icu_detail", "numeric"),       # ICU LOS from icustay_detail (days, for alignment) - renamed
+
         col_def("marital_status", "CHARACTER(100)"),
         col_def("height", "NUMERIC"),
-        col_def("weight", "NUMERIC"), # From first_day_weight (ICU Day 1 Average)
+        col_def("weight", "NUMERIC"), # From first_day_weight (ICU Day 1 Average for *this* stay_id)
 
-        # Add all four weight columns
-        col_def("first_day_admission_weight", "NUMERIC"), # First weight within 24h of ICU admission
-        col_def("first_day_discharge_weight", "NUMERIC"), # Last weight within 24h before ICU discharge
-        col_def("first_ever_admission_weight", "NUMERIC"), # First ever recorded weight during ICU stay
-        col_def("last_ever_discharge_weight", "NUMERIC"),  # Last ever recorded weight during ICU stay
+        col_def("first_day_admission_weight", "NUMERIC"),
+        col_def("first_day_discharge_weight", "NUMERIC"),
+        col_def("first_ever_admission_weight", "NUMERIC"),
+        col_def("last_ever_discharge_weight", "NUMERIC"),
 
-        col_def("bmi", "NUMERIC"), # Calculated using 'weight' (Day 1 average)
-        col_def("icu_los_dod_days", "NUMERIC"), col_def("hospital_los_dod_days", "NUMERIC"),
+        col_def("bmi", "NUMERIC"),
+        col_def("icu_los_dod_days", "NUMERIC"),
+        col_def("hospital_los_dod_days", "NUMERIC"),
         col_def("time_to_death_days", "NUMERIC")
     ]
 
-    # --- Start of Update SQL ---
-    update_sql = f"-- Update Demography and related info for {table_name}\n"
-
-    # Update basic info (excluding weights derived from chartevents)
-    # (Keep the initial UPDATE statements for non-weight columns as before)
+    update_sql = f"-- Update Additional Demography and icustay_detail alignment columns for {table_name}\n"
+    
     update_sql += """
 UPDATE {table_name} af
 SET
-    gender = i.gender, dod = i.dod, admittime = i.admittime, dischtime = i.dischtime,
-    los_hospital = i.los_hospital, admission_age = i.admission_age, race = i.race,
-    hospital_expire_flag = i.hospital_expire_flag, hospstay_seq = i.hospstay_seq,
-    first_hosp_stay = i.first_hosp_stay, icu_intime = i.icu_intime, icu_outtime = i.icu_outtime,
-    los_icu = i.los_icu, icustay_seq = i.icustay_seq, first_icu_stay = i.first_icu_stay
+    gender = i.gender,
+    dod = i.dod,
+    los_hospital = i.los_hospital,
+    admission_age = i.admission_age,
+    race = i.race,
+    hospital_expire_flag = i.hospital_expire_flag,
+    hospstay_seq = i.hospstay_seq,
+    first_hosp_stay = i.first_hosp_stay,
+    icustay_seq = i.icustay_seq,
+    first_icu_stay = i.first_icu_stay,
+    los_icu_detail = i.los_icu -- Populate los_icu_detail from icustay_detail.los_icu
+    -- We DO NOT update af.admittime, af.dischtime, af.icu_intime, af.icu_outtime here
+    -- as they are the primary anchors defined during cohort creation.
+    -- af.los_icu_hours (from cohort creation) is likely preferred over i.los_icu due to precision.
 FROM mimiciv_derived.icustay_detail i
-WHERE af.stay_id = i.stay_id;
+WHERE af.stay_id = i.stay_id; -- Join on the specific stay_id from our cohort
 
 UPDATE {table_name} af
 SET marital_status = ad.marital_status
@@ -63,67 +82,50 @@ SET height = ht.height
 FROM mimiciv_derived.first_day_height ht
 WHERE af.subject_id = ht.subject_id AND af.stay_id = ht.stay_id;
 
--- Update 'weight' using first_day_weight (representing average weight on day 1)
 UPDATE {table_name} af
 SET weight = (
     SELECT avg(wt.weight)
     FROM mimiciv_derived.first_day_weight wt
-    WHERE af.subject_id = wt.subject_id AND af.stay_id = wt.stay_id
-    GROUP BY wt.subject_id
+    WHERE af.stay_id = wt.stay_id -- Ensure join on the cohort's stay_id
+    GROUP BY wt.stay_id
 )
 WHERE EXISTS (
     SELECT 1
     FROM mimiciv_derived.first_day_weight wt
-    WHERE af.subject_id = wt.subject_id AND af.stay_id = wt.stay_id
+    WHERE af.stay_id = wt.stay_id
 );
     """.format(table_name=table_name)
 
-    # --- Optimized Calculation for ALL Four Weights ---
+    # Optimized Calculation for ALL Four Weights (remains the same)
     update_sql += f"""
 
--- Optimized calculation for first/last weights (24h window AND ever)
-WITH RelevantStays AS (
-    SELECT stay_id, icu_intime, icu_outtime FROM {table_name}
-),
-ChartEventsFiltered AS (
-    -- Filter chartevents early for relevant stays and items
-    SELECT ce.stay_id, ce.charttime, ce.valuenum, rs.icu_intime, rs.icu_outtime
+WITH ChartEventsFiltered AS (
+    SELECT ce.stay_id, ce.charttime, ce.valuenum, af_ref.icu_intime, af_ref.icu_outtime
     FROM mimiciv_icu.chartevents ce
-    JOIN RelevantStays rs ON ce.stay_id = rs.stay_id -- Join with relevant stays
-    WHERE ce.itemid IN (226512, 224639) -- Admission Weight (Kg), Daily Weight
+    JOIN {table_name} af_ref ON ce.stay_id = af_ref.stay_id
+    WHERE ce.itemid IN (226512, 224639)
       AND ce.valuenum IS NOT NULL AND ce.valuenum > 0 AND ce.valuenum < 500
 ),
 RankedWeights AS (
-    -- Rank weights based on different criteria
     SELECT
-        stay_id,
-        valuenum,
-        charttime,
-        icu_intime,
-        icu_outtime,
-        -- Rank within first 24 hours of admission (ascending)
+        stay_id, valuenum, charttime, icu_intime, icu_outtime,
         CASE
             WHEN charttime >= icu_intime AND charttime <= (icu_intime + interval '24 hours')
             THEN ROW_NUMBER() OVER(PARTITION BY stay_id ORDER BY charttime ASC, valuenum ASC)
             ELSE NULL
         END as rn_adm_24h,
-        -- Rank within last 24 hours before discharge (descending)
         CASE
             WHEN icu_outtime IS NOT NULL AND charttime <= icu_outtime AND charttime >= (icu_outtime - interval '24 hours')
             THEN ROW_NUMBER() OVER(PARTITION BY stay_id ORDER BY charttime DESC, valuenum ASC)
             ELSE NULL
         END as rn_dis_24h,
-        -- Rank all weights during stay (ascending)
         ROW_NUMBER() OVER(PARTITION BY stay_id ORDER BY charttime ASC, valuenum ASC) as rn_adm_ever,
-        -- Rank all weights during stay (descending)
         ROW_NUMBER() OVER(PARTITION BY stay_id ORDER BY charttime DESC, valuenum ASC) as rn_dis_ever
     FROM ChartEventsFiltered
 ),
 WeightValues AS (
-    -- Aggregate results per stay_id
     SELECT
         stay_id,
-        -- Get value where rank is 1 for each criteria
         MAX(CASE WHEN rn_adm_24h = 1 THEN valuenum ELSE NULL END) as first_day_adm_w,
         MAX(CASE WHEN rn_dis_24h = 1 THEN valuenum ELSE NULL END) as first_day_dis_w,
         MAX(CASE WHEN rn_adm_ever = 1 THEN valuenum ELSE NULL END) as first_ever_adm_w,
@@ -131,7 +133,6 @@ WeightValues AS (
     FROM RankedWeights
     GROUP BY stay_id
 )
--- Final Update joining the aggregated weight results
 UPDATE {table_name} af
 SET
     first_day_admission_weight = wv.first_day_adm_w,
@@ -139,22 +140,20 @@ SET
     first_ever_admission_weight = wv.first_ever_adm_w,
     last_ever_discharge_weight = wv.last_ever_dis_w
 FROM
-    {table_name} af_join_alias -- Use alias for clarity in JOIN
+    {table_name} af_join_alias
     JOIN WeightValues wv ON af_join_alias.stay_id = wv.stay_id
-WHERE af.stay_id = af_join_alias.stay_id; -- Link update target to FROM clause data
+WHERE af.stay_id = af_join_alias.stay_id;
 
--- Calculate BMI after weights are updated (using 'weight' from first_day_weight)
 UPDATE {table_name} af
 SET bmi = weight / (height / 100)^2
 WHERE height IS NOT NULL AND weight IS NOT NULL AND height > 0;
 
--- Update death time calculations (remains the same)
 UPDATE {table_name} af
 SET
-    icu_los_dod_days = CASE WHEN DATE_PART('day', dod - icu_outtime) < 0 THEN 0 ELSE DATE_PART('day', dod - icu_outtime) END,
-    hospital_los_dod_days = CASE WHEN DATE_PART('day', dod - dischtime) < 0 THEN 0 ELSE DATE_PART('day', dod - dischtime) END,
-    time_to_death_days = CASE WHEN DATE_PART('day', dod - admittime) < 0 THEN 0 ELSE DATE_PART('day', dod - admittime) END
-WHERE dod IS NOT NULL;
+    icu_los_dod_days = CASE WHEN af.dod IS NOT NULL AND af.icu_outtime IS NOT NULL AND DATE_PART('day', af.dod - af.icu_outtime) < 0 THEN 0 ELSE DATE_PART('day', af.dod - af.icu_outtime) END,
+    hospital_los_dod_days = CASE WHEN af.dod IS NOT NULL AND af.dischtime IS NOT NULL AND DATE_PART('day', af.dod - af.dischtime) < 0 THEN 0 ELSE DATE_PART('day', af.dod - af.dischtime) END,
+    time_to_death_days = CASE WHEN af.dod IS NOT NULL AND af.admittime IS NOT NULL AND DATE_PART('day', af.dod - af.admittime) < 0 THEN 0 ELSE DATE_PART('day', af.dod - af.admittime) END
+WHERE af.dod IS NOT NULL;
     """.format(table_name=table_name)
 
     return col_defs, update_sql
