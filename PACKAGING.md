@@ -65,6 +65,11 @@
     ```bash
     pyinstaller --name MedicalDataExtractor --onefile --windowed medical_data_extractor.py
     ```
+
+    ```bash
+    pyinstaller --name MedicalDataExtractor --onefile --windowed --icon=./icon.ico medical_data_extractor.py
+    ```
+    -   `--icon=your_icon.ico`:  (可选) 指定可执行文件的图标（ICO 文件）。
     -   `--name MedicalDataExtractor`: 指定生成的可执行文件名和相关文件夹名。
     -   `--onefile`: 将所有内容打包到一个单独的 `.exe` 文件中。
     -   `--windowed`: 创建一个窗口应用程序（隐藏控制台窗口）。
