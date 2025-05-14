@@ -224,36 +224,62 @@ class DataExportTab(QWidget):
 
     @Slot(str, str)
     def preview_specific_table(self, schema_name, table_name):
-         print(f"DataExportTab: Received request to preview: {schema_name}.{table_name}")
-         schema_index = self.schema_combo.findText(schema_name, Qt.MatchFlag.MatchFixedString)
-         if schema_index >= 0:
-             self.schema_combo.setCurrentIndex(schema_index)
-             # refresh_tables will be called by schema_combo's signal if index changed.
-             # If index didn't change, we might need to manually ensure tables are for this schema.
-             # For simplicity, assume refresh_tables + on_table_selected will handle it.
-             # It's crucial that refresh_tables correctly populates and on_table_selected correctly sets self.selected_table_name.
-             
-             # Wait for table_combo to be populated potentially by refresh_tables
-             QApplication.processEvents() # Allow UI to update
+        print(f"DataExportTab: Received request to preview: {schema_name}.{table_name}")
 
-             table_index = self.table_combo.findText(table_name, Qt.MatchFlag.MatchFixedString)
-             if table_index >= 0:
-                 print(f"Found table '{table_name}' at index {table_index}. Setting current index.")
-                 self.table_combo.setCurrentIndex(table_index) # This should trigger on_table_selected
-                 QApplication.processEvents() # Allow on_table_selected to run
-                 
-                 # Directly call preview_data if the selected table is now correct
-                 if self.selected_table_name == table_name and self.selected_table_schema == schema_name:
-                     print(f"Calling preview_data for {self.selected_table_schema}.{self.selected_table_name}")
-                     self.preview_data()
-                 else:
-                     print(f"Preview specific table: Mismatch after setting index. Selected: {self.selected_table_schema}.{self.selected_table_name}")
-                     QMessageBox.warning(self, "预览联动失败", f"无法自动选中表 '{schema_name}.{table_name}' 进行预览。请手动选择。")
-             else:
-                  QMessageBox.warning(self, "预览失败", f"在 Schema '{schema_name}' 中未动态找到表 '{table_name}'。请尝试手动刷新和选择。")
-         else:
-             QMessageBox.warning(self, "预览失败", f"未找到 Schema '{schema_name}'。")
+        # Step 1: Ensure the refresh button is enabled (implies DB connection is likely ok)
+        if not self.refresh_btn.isEnabled():
+            # Try to trigger a full refresh as if on_db_connected was called
+            self.on_db_connected() 
+            QApplication.processEvents() # Allow refresh_schemas_and_tables to run
+            if not self.refresh_btn.isEnabled(): # Still not enabled, serious issue
+                QMessageBox.warning(self, "预览联动失败", "数据库连接似乎有问题，无法刷新列表。")
+                return
 
+        # Step 2: Programmatically set schema, ensuring tables for it are loaded.
+        self.schema_combo.blockSignals(True)
+        schema_idx = self.schema_combo.findText(schema_name, Qt.MatchFlag.MatchFixedString)
+        if schema_idx >= 0:
+            if self.schema_combo.currentIndex() != schema_idx:
+                self.schema_combo.setCurrentIndex(schema_idx)
+                # Manually trigger table refresh for the new schema if setCurrentIndex didn't change
+                # (it would have if index was different). Or rely on refresh_tables(schema_changed=True)
+                # Forcing a refresh here ensures tables are for the correct schema.
+                print(f"Schema changed to '{schema_name}', refreshing tables for it.")
+                self.refresh_tables(schema_changed=True) # Force table refresh for this schema
+            else:
+                # Schema is already selected, but ensure tables are current
+                print(f"Schema '{schema_name}' already selected, ensuring tables are current.")
+                self.refresh_tables(schema_changed=False) # Refresh tables for currently selected schema
+        else:
+            self.schema_combo.blockSignals(False)
+            QMessageBox.warning(self, "预览联动失败", f"未找到 Schema '{schema_name}'。请尝试手动刷新。")
+            return
+        self.schema_combo.blockSignals(False)
+        QApplication.processEvents() # Allow UI to update from refresh_tables
+
+        # Step 3: Programmatically set table
+        self.table_combo.blockSignals(True)
+        table_idx = self.table_combo.findText(table_name, Qt.MatchFlag.MatchFixedString)
+        if table_idx >= 0:
+            if self.table_combo.currentIndex() != table_idx:
+                self.table_combo.setCurrentIndex(table_idx) 
+            # Manually call on_table_selected if setCurrentIndex didn't change current index.
+            # This ensures self.selected_table_name and self.selected_table_schema are updated.
+            self.on_table_selected(table_idx)
+        else:
+            self.table_combo.blockSignals(False)
+            QMessageBox.warning(self, "预览联动失败", f"在 Schema '{schema_name}' 中未动态找到表 '{table_name}'。\n列表内容:\n{[self.table_combo.itemText(i) for i in range(self.table_combo.count())]}\n请尝试手动刷新和选择。")
+            return
+        self.table_combo.blockSignals(False)
+        QApplication.processEvents() # Allow on_table_selected to process
+
+        # Step 4: Verify and Preview
+        if self.selected_table_schema == schema_name and self.selected_table_name == table_name:
+            print(f"Successfully selected {schema_name}.{table_name}. Calling preview_data.")
+            self.preview_data()
+        else:
+            print(f"Preview specific table: Mismatch after programmatic selection. Expected: {schema_name}.{table_name}, Got: {self.selected_table_schema}.{self.selected_table_name}")
+            QMessageBox.warning(self, "预览联动失败", f"无法自动选中表 '{schema_name}.{table_name}' 进行预览。\n当前选中: {self.selected_table_schema}.{self.selected_table_name}。请手动选择。")
     @Slot()
     def preview_data(self):
         print("--- preview_data called ---")

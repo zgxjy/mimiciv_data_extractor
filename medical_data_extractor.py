@@ -7,7 +7,7 @@ from PySide6.QtGui import QIcon
 
 from tab_connection import ConnectionTab
 from tab_structure import StructureTab
-from tab_query_disease import QueryDiseaseTab
+from tab_query_cohort import QueryCohortTab
 from tab_combine_base_info import BaseInfoDataExtractionTab
 from tab_combine_special_info import SpecialInfoDataExtractionTab
 from tab_data_export import DataExportTab
@@ -28,7 +28,7 @@ class MedicalDataExtractor(QMainWindow):
         # Instantiate tabs
         self.connection_tab = ConnectionTab()
         self.structure_tab = StructureTab(self.get_db_params)
-        self.query_disease_tab = QueryDiseaseTab(self.get_db_params)
+        self.query_cohort_tab = QueryCohortTab(self.get_db_params)
         self.data_extraction_tab = BaseInfoDataExtractionTab(self.get_db_params)
         self.special_data_tab = SpecialInfoDataExtractionTab(self.get_db_params)
         self.data_export_tab = DataExportTab(self.get_db_params)
@@ -36,7 +36,7 @@ class MedicalDataExtractor(QMainWindow):
         # Add tabs (ensure correct order for index-based lookup if any)
         self.tabs.addTab(self.connection_tab, "1. 数据库连接")         # Index 0
         self.tabs.addTab(self.structure_tab, "数据库结构查看")        # Index 1
-        self.tabs.addTab(self.query_disease_tab, "2. 查找与创建队列") # Index 2
+        self.tabs.addTab(self.query_cohort_tab, "2. 查找与创建队列") # Index 2
         self.tabs.addTab(self.data_extraction_tab, "3. 添加基础数据") # Index 3
         self.tabs.addTab(self.special_data_tab, "4. 添加专项数据")     # Index 4
         self.tabs.addTab(self.data_export_tab, "5. 数据预览与导出")     # Index 5
@@ -55,8 +55,8 @@ class MedicalDataExtractor(QMainWindow):
         self.structure_tab.set_btn_enabled(True)
         self.structure_tab.view_db_structure() # Automatically refresh structure on connect
 
-        if hasattr(self.query_disease_tab, 'on_db_connected'):
-             self.query_disease_tab.on_db_connected()
+        if hasattr(self.query_cohort_tab, 'on_db_connected'):
+             self.query_cohort_tab.on_db_connected()
         # ... (rest of on_db_connected remains the same) ...
         if hasattr(self.data_extraction_tab, 'on_db_connected'):
             self.data_extraction_tab.on_db_connected()
@@ -96,7 +96,7 @@ class MedicalDataExtractor(QMainWindow):
     def closeEvent(self, event):
         # Attempt to gracefully close/cancel any running worker threads
         tabs_with_workers = [
-            self.query_disease_tab,      # Has cohort_worker_thread
+            self.query_cohort_tab,      # Has cohort_worker_thread
             self.data_extraction_tab,    # Has worker_thread (for base info)
             self.special_data_tab        # Has worker_thread (for special info merge)
         ]
@@ -104,7 +104,7 @@ class MedicalDataExtractor(QMainWindow):
         for tab_instance in tabs_with_workers:
             worker_thread_attr = None
             worker_attr = None
-            if hasattr(tab_instance, 'cohort_worker_thread'): # For QueryDiseaseTab
+            if hasattr(tab_instance, 'cohort_worker_thread'): # For QuerycohortTab
                 worker_thread_attr = 'cohort_worker_thread'
                 worker_attr = 'cohort_worker'
             elif hasattr(tab_instance, 'worker_thread'): # For BaseInfoDataExtractionTab and SpecialInfoDataExtractionTab

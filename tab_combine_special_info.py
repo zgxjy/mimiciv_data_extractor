@@ -133,7 +133,7 @@ class SpecialInfoDataExtractionTab(QWidget):
         self.merge_worker = None
         
         self.event_time_window_options_all = [
-            "首次住院期间 (当前入院)",
+            "整个住院期间 (当前入院)",
             "整个ICU期间 (当前入院)",
             "住院以前 (既往史)"
         ]
@@ -248,7 +248,7 @@ class SpecialInfoDataExtractionTab(QWidget):
 
         lab_time_window_layout = QHBoxLayout()
         lab_time_window_layout.addWidget(QLabel("时间窗口:"))
-        self.lab_time_window_combo = QComboBox(); self.lab_time_window_combo.addItems(["ICU入住后24小时", "ICU入住后48小时", "整个ICU期间", "首次住院期间"])
+        self.lab_time_window_combo = QComboBox(); self.lab_time_window_combo.addItems(["ICU入住后24小时", "ICU入住后48小时", "整个ICU期间", "整个住院期间"])
         self.lab_time_window_combo.currentTextChanged.connect(self.update_default_col_name)
         lab_time_window_layout.addWidget(self.lab_time_window_combo)
         lab_logic_layout_outer.addLayout(lab_time_window_layout) 
@@ -461,11 +461,11 @@ class SpecialInfoDataExtractionTab(QWidget):
         
         time_code = ""
         if self.rb_lab.isChecked():
-            time_map = {"ICU入住后24小时": "icu24h", "ICU入住后48小时": "icu48h", "整个ICU期间": "icu_all", "首次住院期间": "hosp_all"}
+            time_map = {"ICU入住后24小时": "icu24h", "ICU入住后48小时": "icu48h", "整个ICU期间": "icu_all", "整个住院期间": "hosp_all"}
             time_code = time_map.get(self.lab_time_window_combo.currentText(), "")
         else: 
             time_map = { 
-                "首次住院期间 (当前入院)": "cur_hosp",
+                "整个住院期间 (当前入院)": "cur_hosp",
                 "整个ICU期间 (当前入院)": "cur_icu",
                 "住院以前 (既往史)": "prior_adm"
             }
@@ -534,8 +534,18 @@ class SpecialInfoDataExtractionTab(QWidget):
     def refresh_cohort_tables(self):
         if not self._connect_db(): return
         try:
-            self.db_cursor.execute(pgsql.SQL("SELECT table_name FROM information_schema.tables WHERE table_schema = {} AND table_name LIKE {} ORDER BY table_name")
-                                   .format(pgsql.Literal('mimiciv_data'), pgsql.Literal('first_%_admissions')))
+            self.db_cursor.execute(pgsql.SQL("""
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = {schema_name}
+                AND (table_name LIKE {pattern_first} OR table_name LIKE {pattern_all})
+                ORDER BY table_name
+                """)
+                .format(
+                    schema_name=pgsql.Literal('mimiciv_data'),
+                    pattern_first=pgsql.Literal('first_%_admissions'),
+                    pattern_all=pgsql.Literal('all_%_admissions')
+                )
+            )
             tables = self.db_cursor.fetchall()
             current_selection = self.table_combo.currentText()
             self.table_combo.clear()
@@ -806,7 +816,7 @@ class SpecialInfoDataExtractionTab(QWidget):
                          return None, "当前诊断逻辑不应有特定的事件时间列。", params, generated_column_details_for_preview
 
             else: # Prescriptions or Procedures
-                if "首次住院期间 (当前入院)" in time_option:
+                if "整个住院期间 (当前入院)" in time_option:
                     # from_join_clause_for_cte uses the default hadm_id join
                     if actual_event_time_col_ident:
                         time_filter_conditions.append(pgsql.SQL("{evt}.{time_col} BETWEEN {start_ts} AND {end_ts}").format(

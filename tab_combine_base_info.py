@@ -10,7 +10,7 @@ import time
 import pandas as pd
 from base_info_sql import (add_demography, add_antecedent, add_vital_sign,
                            add_blood_info, add_cardiovascular_lab, add_medicine,
-                           add_surgeries, add_past_diagnostic) # Updated imports
+                           add_surgeries, add_past_diagnostic,add_scores) # Updated imports
 
 
 class SQLWorker(QObject):
@@ -190,11 +190,11 @@ class BaseInfoDataExtractionTab(QWidget):
         main_layout = QVBoxLayout(self)
         top_widget = QWidget()
         top_layout = QVBoxLayout(top_widget)
-        instruction_label = QLabel("从数据库中选择病种表，选择要添加的基础数据选项，然后点击“SQL确认预览”生成SQL并确认，最后点击“提取基础数据”。")
+        instruction_label = QLabel("从数据库中选择队列表，选择要添加的基础数据选项，然后点击“SQL确认预览”生成SQL并确认，最后点击“提取基础数据”。")
         instruction_label.setWordWrap(True)
         top_layout.addWidget(instruction_label)
         table_select_layout = QHBoxLayout()
-        table_select_layout.addWidget(QLabel("选择病种表:"))
+        table_select_layout.addWidget(QLabel("选择队列表:"))
         self.table_combo = QComboBox()
         self.table_combo.setMinimumWidth(300)
         self.table_combo.currentIndexChanged.connect(self.on_table_selected)
@@ -295,7 +295,7 @@ class BaseInfoDataExtractionTab(QWidget):
             cur = conn.cursor()
             cur.execute("""
                 SELECT table_name FROM information_schema.tables
-                WHERE table_schema = 'mimiciv_data' AND table_name LIKE 'first_%_admissions'
+                WHERE table_schema = 'mimiciv_data' AND (table_name LIKE 'first_%_admissions' OR table_name LIKE 'all_%_admissions')
                 ORDER BY table_name
             """)
             tables = cur.fetchall()
@@ -304,7 +304,7 @@ class BaseInfoDataExtractionTab(QWidget):
                 if self.table_combo.count() > 0:
                      self.table_combo.setCurrentIndex(0) # Auto-select first
                      self.on_table_selected(0) # Explicitly trigger update for index 0
-            else: self.table_combo.addItem("未找到病种表")
+            else: self.table_combo.addItem("未找到队列表")
         except Exception as e:
             QMessageBox.critical(self, "查询失败", f"无法获取表列表: {str(e)}")
             self.table_combo.addItem("查询表失败")
@@ -315,7 +315,7 @@ class BaseInfoDataExtractionTab(QWidget):
         # Reset confirmation and buttons, enable confirm SQL button if valid table
         self._reset_sql_confirmation()
         current_item_text = self.table_combo.itemText(index) if index >= 0 else None
-        is_valid_table = current_item_text and current_item_text not in ["未找到病种表", "数据库未连接", "查询表失败"]
+        is_valid_table = current_item_text and current_item_text not in ["未找到队列表", "数据库未连接", "查询表失败"]
 
         if is_valid_table:
             self.selected_table = current_item_text
@@ -430,7 +430,6 @@ class BaseInfoDataExtractionTab(QWidget):
         if self.cb_scores.isChecked(): # For patient scores
             defs, updates = add_scores(qualified_table_name, "")
             all_col_defs.extend(defs); all_update_sqls.append(updates)
-            all_col_defs.extend(defs); all_update_sqls.append(updates)
         if self.cb_blood_info.isChecked():
             defs, updates = add_blood_info(qualified_table_name, "")
             all_col_defs.extend(defs); all_update_sqls.append(updates)
@@ -476,7 +475,7 @@ class BaseInfoDataExtractionTab(QWidget):
 
     def extract_data(self):
         if not self.selected_table:
-            QMessageBox.warning(self, "未选择表", "请先选择一个病种表")
+            QMessageBox.warning(self, "未选择表", "请先选择一个队列表")
             return
         if not self.sql_confirmed:
             QMessageBox.warning(self, "SQL未确认", "请先点击SQL确认预览按钮。")
@@ -572,7 +571,7 @@ class BaseInfoDataExtractionTab(QWidget):
     def handle_confirm_sql_preview(self):
         """Generates, displays, and validates the SQL for confirmation."""
         if not self.selected_table:
-            QMessageBox.warning(self, "无操作", "请先选择一个病种表。")
+            QMessageBox.warning(self, "无操作", "请先选择一个队列表。")
             return
 
         # Step 1: Generate the SQL based on current options

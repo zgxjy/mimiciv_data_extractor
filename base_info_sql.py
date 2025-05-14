@@ -702,7 +702,7 @@ WHERE af.stay_id = i.stay_id;
     update_lods = f"""
 -- Update LODS for {table_name}
 UPDATE {table_name} af
-SET lods_score = i.lods_score
+SET lods_score = i.lods
 FROM mimiciv_derived.lods i
 WHERE af.stay_id = i.stay_id;
 """ # LODS is by stay_id
