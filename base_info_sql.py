@@ -342,41 +342,6 @@ FROM mimiciv_derived.first_day_gcs i
 WHERE af.subject_id = i.subject_id and af.stay_id = i.stay_id;
 """
 
-    cols_sofa = [
-        "sofa integer", "respiration integer", "coagulation integer", "liver integer",
-        "cardiovascular integer", "cns integer", "renal integer"
-    ]
-    update_sofa = f"""
--- Update First Day SOFA for {table_name}
-UPDATE {table_name} af
-SET
-    sofa = i.sofa, respiration = i.respiration, coagulation = i.coagulation, liver = i.liver,
-    cardiovascular = i.cardiovascular, cns = i.cns, renal = i.renal
-FROM mimiciv_derived.first_day_sofa i
-WHERE af.subject_id = i.subject_id and af.stay_id = i.stay_id;
-"""
-    cols_sapsii = [
-        "sapsii integer", "sapsii_prob double precision", "age_score integer", "hr_score integer",
-        "sysbp_score integer", "temp_score integer", "pao2fio2_score integer", "uo_score integer",
-        "bun_score integer", "wbc_score integer", "potassium_score integer", "sodium_score integer",
-        "bicarbonate_score integer", "bilirubin_score integer", "gcs_score integer",
-        "comorbidity_score integer", "admissiontype_score integer"
-    ]
-    update_sapsii = f"""
--- Update SAPS-II for {table_name}
-UPDATE {table_name} af
-SET
-    sapsii = i.sapsii, sapsii_prob = i.sapsii_prob, age_score = i.age_score, hr_score = i.hr_score,
-    sysbp_score = i.sysbp_score, temp_score = i.temp_score, pao2fio2_score = i.pao2fio2_score,
-    uo_score = i.uo_score, bun_score = i.bun_score, wbc_score = i.wbc_score,
-    potassium_score = i.potassium_score, sodium_score = i.sodium_score,
-    bicarbonate_score = i.bicarbonate_score, bilirubin_score = i.bilirubin_score,
-    gcs_score = i.gcs_score, comorbidity_score = i.comorbidity_score,
-    admissiontype_score = i.admissiontype_score
-FROM mimiciv_derived.sapsii i
-WHERE af.subject_id = i.subject_id and af.stay_id = i.stay_id;
-"""
-
     # Heart Rate ARV - REMOVE schema prefix from temp table name
     update_hr_arv_preparation = """
 DROP TABLE IF EXISTS heart_rate_arv_temp; -- Removed mimiciv_data. prefix
@@ -412,7 +377,7 @@ DROP TABLE IF EXISTS heart_rate_arv_temp; -- Removed mimiciv_data. prefix
     final_col_defs = []
     processed_names = set()
     # Make sure cols_hr_arv is included in the list of lists for processing
-    for col_list in [cols_vitals, cols_bg, cols_lab, cols_gcs, cols_sofa, cols_sapsii, cols_hr_arv]: # Added cols_hr_arv
+    for col_list in [cols_vitals, cols_bg, cols_lab, cols_gcs, cols_hr_arv]: # Added cols_hr_arv
         for col_def_str in col_list:
             # Defensive split and strip
             parts = col_def_str.split(' ', 1)
@@ -426,7 +391,7 @@ DROP TABLE IF EXISTS heart_rate_arv_temp; -- Removed mimiciv_data. prefix
 
 
     all_updates = "\n\n".join([
-        update_vitals, update_bg, update_lab, update_gcs, update_sofa, update_sapsii,
+        update_vitals, update_bg, update_lab, update_gcs, 
         update_hr_arv_preparation, update_hr_arv_application
     ])
 
@@ -664,5 +629,125 @@ WHERE target_table_alias.subject_id = p_diag.subject_id;
         all_update_sqls.append(category_sql_block)
 
     return all_col_defs, "\n".join(all_update_sqls)
+
+
+# 新的 add_scores 函数
+def add_scores(table_name, sql_accumulator):
+    all_col_defs = []
+    all_update_sqls = [f"-- Update Patient Scores for {table_name} --\n"]
+
+    # SOFA
+    cols_sofa = [
+        col_def("sofa", "integer"), col_def("respiration_sofa", "integer"), # Renamed to avoid conflict
+        col_def("coagulation_sofa", "integer"), col_def("liver_sofa", "integer"),
+        col_def("cardiovascular_sofa", "integer"), col_def("cns_sofa", "integer"), col_def("renal_sofa", "integer")
+    ]
+    update_sofa = f"""
+-- Update First Day SOFA for {table_name}
+UPDATE {table_name} af
+SET
+    sofa = i.sofa, respiration_sofa = i.respiration, coagulation_sofa = i.coagulation, liver_sofa = i.liver,
+    cardiovascular_sofa = i.cardiovascular, cns_sofa = i.cns, renal_sofa = i.renal
+FROM mimiciv_derived.first_day_sofa i
+WHERE af.subject_id = i.subject_id and af.stay_id = i.stay_id;
+"""
+    all_col_defs.extend(cols_sofa)
+    all_update_sqls.append(update_sofa)
+
+    # SAPS-II
+    # Note: SAPS-II includes an age_score, which might conflict with Charlson's age_score.
+    # We can rename it here to avoid issues, e.g., sapsii_age_score.
+    cols_sapsii = [
+        col_def("sapsii", "integer"), col_def("sapsii_prob", "double precision"),
+        col_def("sapsii_age_score", "integer"), col_def("hr_score_sapsii", "integer"), # Renaming for clarity
+        col_def("sysbp_score_sapsii", "integer"), col_def("temp_score_sapsii", "integer"),
+        col_def("pao2fio2_score_sapsii", "integer"), col_def("uo_score_sapsii", "integer"),
+        col_def("bun_score_sapsii", "integer"), col_def("wbc_score_sapsii", "integer"),
+        col_def("potassium_score_sapsii", "integer"), col_def("sodium_score_sapsii", "integer"),
+        col_def("bicarbonate_score_sapsii", "integer"), col_def("bilirubin_score_sapsii", "integer"),
+        col_def("gcs_score_sapsii", "integer"), col_def("comorbidity_score_sapsii", "integer"),
+        col_def("admissiontype_score_sapsii", "integer")
+    ]
+    update_sapsii = f"""
+-- Update SAPS-II for {table_name}
+UPDATE {table_name} af
+SET
+    sapsii = i.sapsii, sapsii_prob = i.sapsii_prob, sapsii_age_score = i.age_score, hr_score_sapsii = i.hr_score,
+    sysbp_score_sapsii = i.sysbp_score, temp_score_sapsii = i.temp_score, pao2fio2_score_sapsii = i.pao2fio2_score,
+    uo_score_sapsii = i.uo_score, bun_score_sapsii = i.bun_score, wbc_score_sapsii = i.wbc_score,
+    potassium_score_sapsii = i.potassium_score, sodium_score_sapsii = i.sodium_score,
+    bicarbonate_score_sapsii = i.bicarbonate_score, bilirubin_score_sapsii = i.bilirubin_score,
+    gcs_score_sapsii = i.gcs_score, comorbidity_score_sapsii = i.comorbidity_score,
+    admissiontype_score_sapsii = i.admissiontype_score
+FROM mimiciv_derived.sapsii i
+WHERE af.subject_id = i.subject_id and af.stay_id = i.stay_id;
+"""
+    all_col_defs.extend(cols_sapsii)
+    all_update_sqls.append(update_sapsii)
+
+    # APS-III
+    cols_apsiii = [col_def("apsiii", "integer"), col_def("apsiii_prob", "double precision")]
+    update_apsiii = f"""
+-- Update APS-III for {table_name}
+UPDATE {table_name} af
+SET apsiii = i.apsiii, apsiii_prob = i.apsiii_prob
+FROM mimiciv_derived.apsiii i
+WHERE af.stay_id = i.stay_id;
+""" # APSIII is by stay_id
+    all_col_defs.extend(cols_apsiii)
+    all_update_sqls.append(update_apsiii)
+
+    # LODS
+    cols_lods = [col_def("lods_score", "integer")] # LODS table has lods_score and component scores, just taking total
+    update_lods = f"""
+-- Update LODS for {table_name}
+UPDATE {table_name} af
+SET lods_score = i.lods_score
+FROM mimiciv_derived.lods i
+WHERE af.stay_id = i.stay_id;
+""" # LODS is by stay_id
+    all_col_defs.extend(cols_lods)
+    all_update_sqls.append(update_lods)
+
+    # OASIS
+    cols_oasis = [col_def("oasis", "integer"), col_def("oasis_prob", "double precision")]
+    update_oasis = f"""
+-- Update OASIS for {table_name}
+UPDATE {table_name} af
+SET oasis = i.oasis, oasis_prob = i.oasis_prob
+FROM mimiciv_derived.oasis i
+WHERE af.stay_id = i.stay_id;
+""" # OASIS is by stay_id
+    all_col_defs.extend(cols_oasis)
+    all_update_sqls.append(update_oasis)
+
+    # SIRS (first_day_sirs)
+    cols_sirs = [col_def("sirs_score", "integer")] # mimiciv_derived.sirs has 'sirs' column, often used as score or flag
+    update_sirs = f"""
+-- Update First Day SIRS for {table_name}
+UPDATE {table_name} af
+SET sirs_score = i.sirs -- Assuming 'sirs' column in mimiciv_derived.sirs is the score/flag
+FROM mimiciv_derived.sirs i
+WHERE af.stay_id = i.stay_id;
+""" # SIRS (first_day_sirs) is by stay_id
+    all_col_defs.extend(cols_sirs)
+    all_update_sqls.append(update_sirs)
+    
+    # Deduplicate column definitions (name only)
+    unique_col_defs_dict = {}
+    for col_def_str_item in all_col_defs:
+        # col_def_str_item might be already a string from col_def() or a list/tuple
+        # Ensure it's a string for split
+        if not isinstance(col_def_str_item, str): # Should not happen with col_def()
+             col_name_part = str(col_def_str_item).split(' ')[0].strip()
+        else:
+             col_name_part = col_def_str_item.split(' ')[0].strip()
+
+        if col_name_part not in unique_col_defs_dict:
+            unique_col_defs_dict[col_name_part] = col_def_str_item
+            
+    final_unique_col_defs = list(unique_col_defs_dict.values())
+
+    return final_unique_col_defs, "\n\n".join(all_update_sqls)
 
 # --- END OF FILE base_info_sql.py ---

@@ -3,6 +3,7 @@
 import sys
 from PySide6.QtWidgets import QApplication, QMainWindow, QTabWidget, QMessageBox # Added QMessageBox
 from PySide6.QtCore import Slot
+from PySide6.QtGui import QIcon
 
 from tab_connection import ConnectionTab
 from tab_structure import StructureTab
@@ -17,6 +18,10 @@ class MedicalDataExtractor(QMainWindow):
         super().__init__()
         self.setWindowTitle("医学数据提取与处理工具 - MIMIC-IV")
         self.setGeometry(100, 100, 900, 850)
+
+        # icon.ico 与 medical_data_extractor.py 在同一目录
+        icon_path = "icon.ico"
+        self.setWindowIcon(QIcon(icon_path))
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
 

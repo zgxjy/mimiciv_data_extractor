@@ -225,16 +225,17 @@ class BaseInfoDataExtractionTab(QWidget):
         scroll_layout = QVBoxLayout(scroll_content)
         self.cb_demography = QCheckBox("住院及人口学信息"); self.cb_demography.setChecked(True)
         self.cb_antecedent = QCheckBox("患者既往史 (Charlson)"); self.cb_antecedent.setChecked(True)
-        self.cb_vital_sign = QCheckBox("患者住院生命体征及评分"); self.cb_vital_sign.setChecked(True) # Combined
+        self.cb_vital_sign = QCheckBox("患者住院生命体征"); self.cb_vital_sign.setChecked(True) # Changed label
+        self.cb_scores = QCheckBox("患者评分 (SOFA, SAPSII, APSIII, LODS, OASIS, SIRS)"); self.cb_scores.setChecked(True) # New checkbox
         self.cb_blood_info = QCheckBox("患者住院红细胞相关指标"); self.cb_blood_info.setChecked(True)
         self.cb_cardiovascular_lab = QCheckBox("患者住院心血管化验指标"); self.cb_cardiovascular_lab.setChecked(True)
         self.cb_medications = QCheckBox("患者住院用药记录"); self.cb_medications.setChecked(True)
         self.cb_surgery = QCheckBox("患者住院手术记录"); self.cb_surgery.setChecked(True)
-        self.cb_past_disease = QCheckBox("患者既往病史 (自定义ICD)"); self.cb_past_disease.setChecked(True)
+        self.cb_past_disease = QCheckBox("患者既往病史 (如高血压、糖尿病等)"); self.cb_past_disease.setChecked(True)
 
         # Store checkboxes and connect stateChanged to reset confirmation
         self.option_checkboxes = [
-            self.cb_demography, self.cb_antecedent, self.cb_vital_sign,
+            self.cb_demography, self.cb_antecedent, self.cb_vital_sign,self.cb_scores,
             self.cb_blood_info, self.cb_cardiovascular_lab, self.cb_medications,
             self.cb_surgery, self.cb_past_disease
         ]
@@ -423,8 +424,12 @@ class BaseInfoDataExtractionTab(QWidget):
         if self.cb_antecedent.isChecked():
             defs, updates = add_antecedent(qualified_table_name, "")
             all_col_defs.extend(defs); all_update_sqls.append(updates)
-        if self.cb_vital_sign.isChecked(): # This one combines several original parts
+        if self.cb_vital_sign.isChecked(): # For actual vital signs
             defs, updates = add_vital_sign(qualified_table_name, "")
+            all_col_defs.extend(defs); all_update_sqls.append(updates)
+        if self.cb_scores.isChecked(): # For patient scores
+            defs, updates = add_scores(qualified_table_name, "")
+            all_col_defs.extend(defs); all_update_sqls.append(updates)
             all_col_defs.extend(defs); all_update_sqls.append(updates)
         if self.cb_blood_info.isChecked():
             defs, updates = add_blood_info(qualified_table_name, "")
