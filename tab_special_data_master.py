@@ -392,39 +392,58 @@ class SpecialDataMasterTab(QWidget):
         current_id = self.source_selection_group.checkedId()
         active_panel = self.config_panels.get(current_id)
 
-        use_value_aggregation = False
+        use_value_aggregation_ui = False
+        is_text_value_source = False # 新增标志，判断是否为文本型值源
         time_options_for_combo = []
 
         if active_panel:
-            # 如果面板自己提供聚合UI或时间窗口，则隐藏通用的
-            # (chartevents panel 现在配置为使用通用的)
+            # 检查面板是否覆盖通用UI
             if active_panel.get_aggregation_config_widget() is not None:
                 self.common_agg_options_widget.hide()
                 self.common_event_output_widget.hide()
-            else: # 面板使用通用聚合逻辑
-                if active_panel.get_value_column_for_aggregation() is not None: # 如 chartevents, labevents
+            else: # 面板使用通用聚合UI
+                value_col_to_agg = active_panel.get_value_column_for_aggregation()
+                if value_col_to_agg: # 如 chartevents, labevents
                     self.common_agg_options_widget.show()
                     self.common_event_output_widget.hide()
-                    use_value_aggregation = True
+                    use_value_aggregation_ui = True
+                    if value_col_to_agg == "value": # 如果面板指示提取文本 'value'
+                        is_text_value_source = True
                 else: # 如 prescriptions, procedures, diagnoses
                     self.common_agg_options_widget.hide()
                     self.common_event_output_widget.show()
-                    use_value_aggregation = False
+                    use_value_aggregation_ui = False # 事件型输出
             
             panel_time_options = active_panel.get_time_window_options()
-            if panel_time_options is not None: # 面板有自己特定的时间窗口
+            if panel_time_options is not None: 
                 time_options_for_combo = panel_time_options
-            else: # 面板使用通用的时间窗口
-                if use_value_aggregation: # chartevents, labevents
+            else: 
+                if use_value_aggregation_ui: 
                     time_options_for_combo = self.value_agg_time_window_options
-                else: # prescriptions, procedures, diagnoses
+                else: 
                     if current_id == self.SOURCE_DIAGNOSES:
                         time_options_for_combo = self.diag_event_time_window_options
                     else:
                         time_options_for_combo = self.general_event_time_window_options
-        else: # 没有活动面板
+        else: 
             self.common_agg_options_widget.hide()
             self.common_event_output_widget.hide()
+
+        # 根据是否为文本源，动态启用/禁用通用数值聚合选项
+        if use_value_aggregation_ui:
+            is_text = is_text_value_source
+            self.cb_common_min.setEnabled(not is_text)
+            self.cb_common_max.setEnabled(not is_text)
+            self.cb_common_mean.setEnabled(not is_text)
+            # First, Last, CountVal 对文本和数值都可能有意义（CountVal对文本可理解为非空文本计数）
+            self.cb_common_first.setEnabled(True)
+            self.cb_common_last.setEnabled(True)
+            self.cb_common_count_val.setEnabled(True)
+            if is_text: # 如果是文本，取消数值型聚合的勾选
+                if self.cb_common_min.isChecked(): self.cb_common_min.setChecked(False)
+                if self.cb_common_max.isChecked(): self.cb_common_max.setChecked(False)
+                if self.cb_common_mean.isChecked(): self.cb_common_mean.setChecked(False)
+
 
         current_time_text = self.common_time_window_combo.currentText()
         self.common_time_window_combo.blockSignals(True)
@@ -673,10 +692,6 @@ class SpecialDataMasterTab(QWidget):
             return None, "未选择有效的数据来源或未找到配置面板.", [], generated_column_details_for_preview
         
         panel_config = active_panel.get_panel_config()
-        # panel_config 应该包含:
-        # source_event_table, source_dict_table (optional), item_id_column_in_event_table,
-        # item_filter_conditions (sql, params), selected_item_ids
-        
         selected_item_ids_values = panel_config.get("selected_item_ids", [])
         if not selected_item_ids_values:
             return None, "未在当前数据来源面板中选择要合并的项目.", [], generated_column_details_for_preview
@@ -684,29 +699,30 @@ class SpecialDataMasterTab(QWidget):
         source_event_table = panel_config["source_event_table"]
         id_col_in_event_table = panel_config["item_id_column_in_event_table"]
         
-        # 3. 确定聚合值列和时间列 (从面板获取)
-        val_col_for_agg = active_panel.get_value_column_for_aggregation() # e.g., "valuenum"
-        time_col_for_window = active_panel.get_time_column_for_windowing() # e.g., "charttime"
+        # 3. 确定要提取的值列和时间列
+        #    优先从 panel_config 获取 (例如 CharteventsPanel 会放入 "value_column_to_extract")
+        #    否则回退到面板的通用方法
+        value_column_to_extract_from_panel = panel_config.get("value_column_to_extract")
+        if not value_column_to_extract_from_panel: # 如果面板没在config里指定，尝试通用方法
+             value_column_to_extract_from_panel = active_panel.get_value_column_for_aggregation()
+
+        time_col_for_window = active_panel.get_time_column_for_windowing()
 
         # 4. 定义SQL构建中常用的标识符
         target_table_ident = pgsql.Identifier('mimiciv_data', self.selected_cohort_table)
         cohort_alias = pgsql.Identifier("cohort")
         event_alias = pgsql.Identifier("evt")
-        event_admission_alias = pgsql.Identifier("adm_evt") # 用于诊断等的历史追溯
-        md_alias = pgsql.Identifier("md") # MergedData alias
-        target_alias = pgsql.Identifier("target") # Target table alias for UPDATE
+        event_admission_alias = pgsql.Identifier("adm_evt")
+        md_alias = pgsql.Identifier("md") 
+        target_alias = pgsql.Identifier("target")
 
         # 5. 构建 FilteredEvents CTE 的参数和条件
-        #    a. 项目ID条件 (来自 panel_config)
-        params_for_cte = list(panel_config["item_filter_conditions"][1]) # 复制一份，因为后面可能追加
-        item_id_conditions_sql_template = panel_config["item_filter_conditions"][0] # 这是针对字典表的筛选
-        
-        #  需要修改：item_id_conditions 应该是针对 event_table 的 id_col_in_event_table
+        #    a. 项目ID条件
+        #       panel_config["item_filter_conditions"] 是针对字典表的，我们用 selected_item_ids_values 过滤事件表
+        params_for_cte = [] 
         item_id_filter_on_event_table_parts = []
         event_table_item_id_col_ident = pgsql.Identifier(id_col_in_event_table)
         
-        # 如果字典表被用来筛选ID，那么 selected_item_ids_values 就是从字典表筛选出来的ID
-        # 这些ID需要用来过滤事件表
         if selected_item_ids_values:
             if len(selected_item_ids_values) == 1:
                 item_id_filter_on_event_table_parts.append(pgsql.SQL("{}.{} = %s").format(event_alias, event_table_item_id_col_ident))
@@ -714,158 +730,151 @@ class SpecialDataMasterTab(QWidget):
             else:
                 item_id_filter_on_event_table_parts.append(pgsql.SQL("{}.{} IN %s").format(event_alias, event_table_item_id_col_ident))
                 params_for_cte.append(tuple(selected_item_ids_values))
-        else: # 如果selected_item_ids_values为空，理论上不应该到这里，因为按钮状态会阻止
+        else:
             return None, "未选择任何项目进行提取。", [], generated_column_details_for_preview
 
-
-        #    b. 时间窗口条件 (来自通用时间窗口UI)
+        #    b. 时间窗口条件
         time_filter_conditions_sql_parts = []
         cohort_icu_intime = pgsql.SQL("{}.icu_intime").format(cohort_alias)
         cohort_icu_outtime = pgsql.SQL("{}.icu_outtime").format(cohort_alias)
         cohort_admittime = pgsql.SQL("{}.admittime").format(cohort_alias)
         cohort_dischtime = pgsql.SQL("{}.dischtime").format(cohort_alias)
-        
         current_time_window_text = self.common_time_window_combo.currentText()
         actual_event_time_col_ident = pgsql.Identifier(time_col_for_window) if time_col_for_window else None
+        from_join_clause_for_cte_override = None # 用于特殊情况，如“住院以前”
 
-        is_value_source = bool(val_col_for_agg) # 是否是提取数值的源 (lab, chartevents)
+        is_value_source_with_time = bool(value_column_to_extract_from_panel) and bool(actual_event_time_col_ident)
 
-        if is_value_source: # labevents, chartevents
+        if active_panel.get_value_column_for_aggregation() is not None: # 处理labevents, chartevents这类有值的
             if not actual_event_time_col_ident:
-                return None, f"{source_event_table} 需要时间列进行窗口化提取，但未配置。", params_for_cte, generated_column_details_for_preview
-            if current_time_window_text == "ICU入住后24小时":
-                time_filter_conditions_sql_parts.append(pgsql.SQL("{evt}.{time_col} BETWEEN {start_ts} AND ({start_ts} + interval '24 hours')").format(evt=event_alias, time_col=actual_event_time_col_ident, start_ts=cohort_icu_intime))
-            elif current_time_window_text == "ICU入住后48小时":
-                time_filter_conditions_sql_parts.append(pgsql.SQL("{evt}.{time_col} BETWEEN {start_ts} AND ({start_ts} + interval '48 hours')").format(evt=event_alias, time_col=actual_event_time_col_ident, start_ts=cohort_icu_intime))
-            elif current_time_window_text == "整个ICU期间":
-                time_filter_conditions_sql_parts.append(pgsql.SQL("{evt}.{time_col} BETWEEN {start_ts} AND {end_ts}").format(evt=event_alias, time_col=actual_event_time_col_ident, start_ts=cohort_icu_intime, end_ts=cohort_icu_outtime))
-            elif current_time_window_text == "整个住院期间":
-                time_filter_conditions_sql_parts.append(pgsql.SQL("{evt}.{time_col} BETWEEN {start_ts} AND {end_ts}").format(evt=event_alias, time_col=actual_event_time_col_ident, start_ts=cohort_admittime, end_ts=cohort_dischtime))
+                return None, f"{active_panel.get_friendly_source_name()} 需要时间列进行窗口化提取，但未配置。", params_for_cte, generated_column_details_for_preview
+            if current_time_window_text == "ICU入住后24小时": time_filter_conditions_sql_parts.append(pgsql.SQL("{evt}.{time_col} BETWEEN {start_ts} AND ({start_ts} + interval '24 hours')").format(evt=event_alias, time_col=actual_event_time_col_ident, start_ts=cohort_icu_intime))
+            elif current_time_window_text == "ICU入住后48小时": time_filter_conditions_sql_parts.append(pgsql.SQL("{evt}.{time_col} BETWEEN {start_ts} AND ({start_ts} + interval '48 hours')").format(evt=event_alias, time_col=actual_event_time_col_ident, start_ts=cohort_icu_intime))
+            elif current_time_window_text == "整个ICU期间": time_filter_conditions_sql_parts.append(pgsql.SQL("{evt}.{time_col} BETWEEN {start_ts} AND {end_ts}").format(evt=event_alias, time_col=actual_event_time_col_ident, start_ts=cohort_icu_intime, end_ts=cohort_icu_outtime))
+            elif current_time_window_text == "整个住院期间": time_filter_conditions_sql_parts.append(pgsql.SQL("{evt}.{time_col} BETWEEN {start_ts} AND {end_ts}").format(evt=event_alias, time_col=actual_event_time_col_ident, start_ts=cohort_admittime, end_ts=cohort_dischtime))
         else: # 事件型 (med, proc, diag)
             if current_time_window_text == "住院以前 (既往史)":
-                from_join_clause_for_cte_override = pgsql.SQL(
-                    "FROM {event_table} {evt_alias} "
-                    "JOIN mimiciv_hosp.admissions {adm_evt} ON {evt_alias}.hadm_id = {adm_evt}.hadm_id "
-                    "JOIN {cohort_table} {coh_alias} ON {evt_alias}.subject_id = {coh_alias}.subject_id "
-                ).format(event_table=pgsql.SQL(source_event_table), evt_alias=event_alias, adm_evt=event_admission_alias,
-                         cohort_table=target_table_ident, coh_alias=cohort_alias)
+                from_join_clause_for_cte_override = pgsql.SQL("FROM {event_table} {evt_alias} JOIN mimiciv_hosp.admissions {adm_evt} ON {evt_alias}.hadm_id = {adm_evt}.hadm_id JOIN {cohort_table} {coh_alias} ON {evt_alias}.subject_id = {coh_alias}.subject_id ").format(event_table=pgsql.SQL(source_event_table), evt_alias=event_alias, adm_evt=event_admission_alias, cohort_table=target_table_ident, coh_alias=cohort_alias)
                 time_filter_conditions_sql_parts.append(pgsql.SQL("{adm_evt}.admittime < {compare_ts}").format(adm_evt=event_admission_alias, compare_ts=cohort_admittime))
-            elif current_time_window_text == "整个住院期间 (当前入院)":
-                if actual_event_time_col_ident:
-                    time_filter_conditions_sql_parts.append(pgsql.SQL("{evt}.{time_col} BETWEEN {start_ts} AND {end_ts}").format(evt=event_alias, time_col=actual_event_time_col_ident, start_ts=cohort_admittime, end_ts=cohort_dischtime))
-            elif current_time_window_text == "整个ICU期间 (当前入院)":
-                if actual_event_time_col_ident:
-                     time_filter_conditions_sql_parts.append(pgsql.SQL("{evt}.{time_col} BETWEEN {start_ts} AND {end_ts}").format(evt=event_alias, time_col=actual_event_time_col_ident, start_ts=cohort_icu_intime, end_ts=cohort_icu_outtime))
-                elif active_panel_id == self.SOURCE_CHARTEVENTS: # Chartevents 可能用 stay_id
-                     pass # Chartevents JOIN on stay_id already filters by ICU stay implicitly for "整个ICU期间" if cohort.stay_id is the one.
-                          # If cohort.stay_id is null, this won't work well for "整个ICU期间"
-            # else: return None, f"未知时间窗口: {current_time_window_text}", params_for_cte, generated_column_details_for_preview
-
+            elif current_time_window_text == "整个住院期间 (当前入院)" and actual_event_time_col_ident: time_filter_conditions_sql_parts.append(pgsql.SQL("{evt}.{time_col} BETWEEN {start_ts} AND {end_ts}").format(evt=event_alias, time_col=actual_event_time_col_ident, start_ts=cohort_admittime, end_ts=cohort_dischtime))
+            elif current_time_window_text == "整个ICU期间 (当前入院)" and actual_event_time_col_ident: time_filter_conditions_sql_parts.append(pgsql.SQL("{evt}.{time_col} BETWEEN {start_ts} AND {end_ts}").format(evt=event_alias, time_col=actual_event_time_col_ident, start_ts=cohort_icu_intime, end_ts=cohort_icu_outtime))
 
         # 6. 构建 FilteredEvents CTE 的 SELECT 列, FROM/JOIN, WHERE
         select_event_cols_defs = [
             pgsql.SQL("{}.subject_id AS subject_id").format(cohort_alias),
             pgsql.SQL("{}.hadm_id AS hadm_id_cohort").format(cohort_alias)
         ]
-        if val_col_for_agg: # 对于lab/chartevents，需要值列
-            select_event_cols_defs.append(pgsql.SQL("{}.{} AS event_value").format(event_alias, pgsql.Identifier(val_col_for_agg)))
-        if time_col_for_window: # 对于需要时间排序或窗口的，需要时间列
+        if value_column_to_extract_from_panel: # 如果面板指定了要提取的值列
+            select_event_cols_defs.append(pgsql.SQL("{}.{} AS event_value").format(event_alias, pgsql.Identifier(value_column_to_extract_from_panel)))
+        if time_col_for_window: 
             select_event_cols_defs.append(pgsql.SQL("{}.{} AS event_time").format(event_alias, pgsql.Identifier(time_col_for_window)))
 
-        # 默认 JOIN 逻辑
-        from_join_clause_for_cte = pgsql.SQL(
-            "FROM {event_table} {evt_alias} JOIN {cohort_table} {coh_alias} ON {evt_alias}.hadm_id = {coh_alias}.hadm_id"
-        ).format(event_table=pgsql.SQL(source_event_table), evt_alias=event_alias, cohort_table=target_table_ident, coh_alias=cohort_alias)
-
-        # 特殊 JOIN 逻辑 for chartevents (用 stay_id) 和 "住院以前"
+        from_join_clause_for_cte = pgsql.SQL("FROM {event_table} {evt_alias} JOIN {cohort_table} {coh_alias} ON {evt_alias}.hadm_id = {coh_alias}.hadm_id").format(event_table=pgsql.SQL(source_event_table), evt_alias=event_alias, cohort_table=target_table_ident, coh_alias=cohort_alias)
         if active_panel_id == self.SOURCE_CHARTEVENTS:
-            # Chartevents 最好用 stay_id (如果队列表有的话)
-            # 假设队列表的 stay_id 是有效的
-            from_join_clause_for_cte = pgsql.SQL(
-                "FROM {event_table} {evt_alias} JOIN {cohort_table} {coh_alias} ON {evt_alias}.stay_id = {coh_alias}.stay_id"
-            ).format(event_table=pgsql.SQL(source_event_table), evt_alias=event_alias, cohort_table=target_table_ident, coh_alias=cohort_alias)
-        
-        if hasattr(self, 'from_join_clause_for_cte_override') and self.from_join_clause_for_cte_override: # 如果时间窗口设置了覆盖
-            from_join_clause_for_cte = self.from_join_clause_for_cte_override
-            del self.from_join_clause_for_cte_override # 用完即删
-
+            from_join_clause_for_cte = pgsql.SQL("FROM {event_table} {evt_alias} JOIN {cohort_table} {coh_alias} ON {evt_alias}.stay_id = {coh_alias}.stay_id").format(event_table=pgsql.SQL(source_event_table), evt_alias=event_alias, cohort_table=target_table_ident, coh_alias=cohort_alias)
+        if from_join_clause_for_cte_override: from_join_clause_for_cte = from_join_clause_for_cte_override
+            
         all_where_conditions_sql_parts = item_id_filter_on_event_table_parts + time_filter_conditions_sql_parts
-        
-        filtered_events_cte_sql = pgsql.SQL(
-            "FilteredEvents AS (SELECT DISTINCT {select_list} {from_join_clause} WHERE {conditions})"
-        ).format(
+        filtered_events_cte_sql = pgsql.SQL("FilteredEvents AS (SELECT DISTINCT {select_list} {from_join_clause} WHERE {conditions})").format(
             select_list=pgsql.SQL(', ').join(select_event_cols_defs),
             from_join_clause=from_join_clause_for_cte,
             conditions=pgsql.SQL(' AND ').join(all_where_conditions_sql_parts) if all_where_conditions_sql_parts else pgsql.SQL("TRUE")
         )
 
         # 7. 构建聚合逻辑
-        selected_methods_details = [] # (final_col_name_str, final_col_ident, agg_template_str, pgsql_col_type_obj)
+        selected_methods_details = []
         type_map_pgsql_to_str = { "NUMERIC": "Numeric", "INTEGER": "Integer", "BOOLEAN": "Boolean", "TEXT": "Text" }
         
-        # 使用通用UI控件的状态
-        if self.common_agg_options_widget.isVisible(): # 数值型聚合
-            method_configs = [
-                (self.cb_common_first, "first", "(array_agg({val} ORDER BY {time} ASC NULLS LAST))[1]", pgsql.SQL("NUMERIC")),
-                (self.cb_common_last, "last", "(array_agg({val} ORDER BY {time} DESC NULLS LAST))[1]", pgsql.SQL("NUMERIC")),
-                (self.cb_common_min, "min", "MIN({val})", pgsql.SQL("NUMERIC")),
-                (self.cb_common_max, "max", "MAX({val})", pgsql.SQL("NUMERIC")),
-                (self.cb_common_mean, "mean", "AVG({val})", pgsql.SQL("NUMERIC")),
-                (self.cb_common_count_val, "countval", "COUNT({val})", pgsql.SQL("INTEGER")),
-            ]
-            for cb, suffix, agg_template, col_type_sql_obj in method_configs:
-                if cb.isChecked():
-                    final_col_name_str = f"{base_new_col_name_str}_{suffix}" # suffix 已经是小写
-                    is_valid_final_name, final_name_error = self._validate_column_name(final_col_name_str)
-                    if not is_valid_final_name: return None, f"列名错误 ({final_col_name_str}): {final_name_error}", params_for_cte, generated_column_details_for_preview
-                    selected_methods_details.append((final_col_name_str, pgsql.Identifier(final_col_name_str), agg_template, col_type_sql_obj))
-                    col_type_str_raw = col_type_sql_obj.as_string(self._db_conn if self._connect_panel_db() else pgsql.SQL("TEXT")) # 尝试获取连接
-                    self._close_panel_db() # 关闭临时连接
-                    generated_column_details_for_preview.append((final_col_name_str, type_map_pgsql_to_str.get(col_type_str_raw.upper(), col_type_str_raw)))
+        is_text_extraction = (value_column_to_extract_from_panel == "value") # 判断是否提取文本
 
-        elif self.common_event_output_widget.isVisible(): # 事件型输出
-            method_configs = [
-                (self.cb_common_exists, "exists", "TRUE", pgsql.SQL("BOOLEAN")),
-                (self.cb_common_count_event, "countevt", "COUNT(*)", pgsql.SQL("INTEGER")),
-            ]
-            for cb, suffix, agg_template, col_type_sql_obj in method_configs:
-                if cb.isChecked():
-                    final_col_name_str = f"{base_new_col_name_str}_{suffix}"
-                    is_valid_final_name, final_name_error = self._validate_column_name(final_col_name_str)
-                    if not is_valid_final_name: return None, f"列名错误 ({final_col_name_str}): {final_name_error}", params_for_cte, generated_column_details_for_preview
-                    selected_methods_details.append((final_col_name_str, pgsql.Identifier(final_col_name_str), agg_template, col_type_sql_obj))
-                    col_type_str_raw = col_type_sql_obj.as_string(self._db_conn if self._connect_panel_db() else pgsql.SQL("TEXT"))
-                    self._close_panel_db()
-                    generated_column_details_for_preview.append((final_col_name_str, type_map_pgsql_to_str.get(col_type_str_raw.upper(), col_type_str_raw)))
-        
+        conn_for_type_check = None # 用于 .as_string()
+        try:
+            if active_panel._connect_panel_db(): conn_for_type_check = active_panel._db_conn
+
+            if self.common_agg_options_widget.isVisible(): # 数值型或文本型值的聚合
+                method_configs = []
+                if not is_text_extraction: # 数值型 (e.g., valuenum)
+                     method_configs = [
+                        (self.cb_common_first, "first", "(array_agg({val} ORDER BY {time} ASC NULLS LAST))[1]", pgsql.SQL("NUMERIC")),
+                        (self.cb_common_last, "last", "(array_agg({val} ORDER BY {time} DESC NULLS LAST))[1]", pgsql.SQL("NUMERIC")),
+                        (self.cb_common_min, "min", "MIN({val})", pgsql.SQL("NUMERIC")),
+                        (self.cb_common_max, "max", "MAX({val})", pgsql.SQL("NUMERIC")),
+                        (self.cb_common_mean, "mean", "AVG({val})", pgsql.SQL("NUMERIC")),
+                        (self.cb_common_count_val, "countval", "COUNT({val})", pgsql.SQL("INTEGER")), # 计数非空值
+                    ]
+                else: # 文本型 (e.g., value)
+                    method_configs = [
+                        (self.cb_common_first, "first_text", "(array_agg({val} ORDER BY {time} ASC NULLS LAST))[1]", pgsql.SQL("TEXT")),
+                        (self.cb_common_last, "last_text", "(array_agg({val} ORDER BY {time} DESC NULLS LAST))[1]", pgsql.SQL("TEXT")),
+                        (self.cb_common_min, "min_text", "MIN(CAST({val} AS TEXT))", pgsql.SQL("TEXT")), 
+                        (self.cb_common_max, "max_text", "MAX(CAST({val} AS TEXT))", pgsql.SQL("TEXT")),
+                        # MEAN 不适用于文本
+                        (self.cb_common_count_val, "counttext", "COUNT(CASE WHEN {val} IS NOT NULL AND CAST({val} AS TEXT) <> '' THEN 1 ELSE NULL END)", pgsql.SQL("INTEGER")), # 计数非空且非空字符串的文本
+                    ]
+
+                for cb, suffix, agg_template, col_type_sql_obj in method_configs:
+                    if cb.isChecked() and cb.isEnabled(): 
+                        final_col_name_str = f"{base_new_col_name_str}_{suffix}"
+                        is_valid_final_name, final_name_error = self._validate_column_name(final_col_name_str)
+                        if not is_valid_final_name: return None, f"列名错误 ({final_col_name_str}): {final_name_error}", params_for_cte, generated_column_details_for_preview
+                        selected_methods_details.append((final_col_name_str, pgsql.Identifier(final_col_name_str), agg_template, col_type_sql_obj))
+                        
+                        temp_conn_for_as_string = conn_for_type_check if conn_for_type_check else psycopg2.connect(dbname='dummy')
+                        col_type_str_raw = col_type_sql_obj.as_string(temp_conn_for_as_string)
+                        if conn_for_type_check is None and hasattr(temp_conn_for_as_string, 'dsn') and temp_conn_for_as_string.dsn != 'dbname=dummy': temp_conn_for_as_string.close()
+                            
+                        generated_column_details_for_preview.append((final_col_name_str, type_map_pgsql_to_str.get(col_type_str_raw.upper(), col_type_str_raw)))
+
+            elif self.common_event_output_widget.isVisible(): # 事件型输出
+                method_configs = [
+                    (self.cb_common_exists, "exists", "TRUE", pgsql.SQL("BOOLEAN")),
+                    (self.cb_common_count_event, "countevt", "COUNT(*)", pgsql.SQL("INTEGER")), # 计数事件发生次数
+                ]
+                for cb, suffix, agg_template, col_type_sql_obj in method_configs:
+                    if cb.isChecked():
+                        final_col_name_str = f"{base_new_col_name_str}_{suffix}"
+                        is_valid_final_name, final_name_error = self._validate_column_name(final_col_name_str)
+                        if not is_valid_final_name: return None, f"列名错误 ({final_col_name_str}): {final_name_error}", params_for_cte, generated_column_details_for_preview
+                        selected_methods_details.append((final_col_name_str, pgsql.Identifier(final_col_name_str), agg_template, col_type_sql_obj))
+
+                        temp_conn_for_as_string = conn_for_type_check if conn_for_type_check else psycopg2.connect(dbname='dummy')
+                        col_type_str_raw = col_type_sql_obj.as_string(temp_conn_for_as_string)
+                        if conn_for_type_check is None and hasattr(temp_conn_for_as_string, 'dsn') and temp_conn_for_as_string.dsn != 'dbname=dummy': temp_conn_for_as_string.close()
+                        generated_column_details_for_preview.append((final_col_name_str, type_map_pgsql_to_str.get(col_type_str_raw.upper(), col_type_str_raw)))
+        finally:
+            if active_panel and conn_for_type_check == active_panel._db_conn: # 只关闭由面板打开的连接
+                 active_panel._close_panel_db()
+            elif conn_for_type_check and (not hasattr(conn_for_type_check,'dsn') or conn_for_type_check.dsn != 'dbname=dummy'): # 关闭非dummy的临时连接
+                 conn_for_type_check.close()
+
+
         if not selected_methods_details:
-            return None, "请至少选择一种提取方式或输出类型。", params_for_cte, generated_column_details_for_preview
-
-        # 构建聚合SELECT列表
+            return None, "请至少选择一种有效的提取方式或输出类型。", params_for_cte, generated_column_details_for_preview
+        
         aggregated_columns_sql_list = []
-        fe_val_ident = pgsql.Identifier("event_value")
+        fe_val_ident = pgsql.Identifier("event_value") 
         fe_time_ident = pgsql.Identifier("event_time")
         cte_hadm_id_for_grouping = pgsql.Identifier("hadm_id_cohort") 
         group_by_hadm_id_sql = pgsql.SQL(" GROUP BY {}").format(cte_hadm_id_for_grouping)
 
-
         for _, final_col_ident, agg_template_str, _ in selected_methods_details:
-            sql_expr = None
-            if self.common_agg_options_widget.isVisible(): # 数值型聚合
-                if "{val}" not in agg_template_str and "{time}" not in agg_template_str:
-                     sql_expr = pgsql.SQL(agg_template_str) # e.g. COUNT(*) if template was just COUNT(*)
-                elif "{val}" in agg_template_str and "{time}" in agg_template_str:
-                    if not time_col_for_window: return None, f"提取方式 '{agg_template_str}' 需要时间列。", params_for_cte, generated_column_details_for_preview
-                    sql_expr = pgsql.SQL(agg_template_str).format(val=fe_val_ident, time=fe_time_ident)
-                elif "{val}" in agg_template_str:
-                    sql_expr = pgsql.SQL(agg_template_str).format(val=fe_val_ident)
-                else: # Should not happen
-                    return None, f"数值聚合模板 '{agg_template_str}' 格式无法识别。", params_for_cte, generated_column_details_for_preview
-            else: # 事件型聚合
-                sql_expr = pgsql.SQL(agg_template_str)
+            sql_expr_str = agg_template_str # 字符串模板
+            
+            # 替换模板中的占位符
+            # 对于 {val} 和 {time} 的替换，需要确保它们在 SELECT 子句中作为 event_value 和 event_time 存在
+            if "{val}" in sql_expr_str and "{time}" in sql_expr_str:
+                if not value_column_to_extract_from_panel or not time_col_for_window:
+                    return None, f"提取方式 '{agg_template_str}' 需要值列和时间列。", params_for_cte, generated_column_details_for_preview
+                sql_expr = pgsql.SQL(sql_expr_str).format(val=fe_val_ident, time=fe_time_ident)
+            elif "{val}" in sql_expr_str:
+                if not value_column_to_extract_from_panel:
+                    return None, f"提取方式 '{agg_template_str}' 需要值列。", params_for_cte, generated_column_details_for_preview
+                sql_expr = pgsql.SQL(sql_expr_str).format(val=fe_val_ident)
+            else: # 如 COUNT(*) 或 TRUE
+                sql_expr = pgsql.SQL(sql_expr_str)
+                
             aggregated_columns_sql_list.append(pgsql.SQL("{} AS {}").format(sql_expr, final_col_ident))
         
-        # 8. 组装最终查询
         main_aggregation_select_sql = pgsql.SQL("SELECT {hadm_grp_col}, {agg_cols} FROM FilteredEvents {gb}").format(
             hadm_grp_col=cte_hadm_id_for_grouping,
             agg_cols=pgsql.SQL(', ').join(aggregated_columns_sql_list),
@@ -874,7 +883,6 @@ class SpecialDataMasterTab(QWidget):
         data_generation_query_part = pgsql.SQL("WITH {filtered_cte} {main_agg_select}").format(
             filtered_cte=filtered_events_cte_sql, main_agg_select=main_aggregation_select_sql)
 
-        # ... (后续的 for_execution 和 for_preview 逻辑与之前版本基本一致, 使用这里的 data_generation_query_part 和 params_for_cte)
         if for_execution:
             alter_clauses = []
             for _, final_col_ident, _, col_type_sql_obj in selected_methods_details:
@@ -907,8 +915,9 @@ class SpecialDataMasterTab(QWidget):
                 pgsql.SQL("{}.subject_id").format(cohort_alias),
                 pgsql.SQL("{}.hadm_id").format(cohort_alias)
             ]
-            if hasattr(self.config_panels.get(active_panel_id), 'stay_id_present_in_cohort') and self.config_panels[active_panel_id].stay_id_present_in_cohort: # 假设有方法检查队列表是否有stay_id
-                 preview_select_cols.append(pgsql.SQL("{}.stay_id").format(cohort_alias))
+            # 尝试添加 stay_id (如果面板指示队列表有它)
+            # 简化：目前总是尝试添加，如果列不存在，SQL会失败，这在预览中可接受
+            preview_select_cols.append(pgsql.SQL("{}.stay_id").format(cohort_alias))
 
 
             for _, final_col_ident, _, _ in selected_methods_details: 
@@ -920,20 +929,19 @@ class SpecialDataMasterTab(QWidget):
                 "WITH MergedDataCTE AS ({data_gen_query}) "
                 "SELECT {select_cols_list} "
                 "FROM {target_table} {coh_alias} "
-                "LEFT JOIN MergedDataCTE {md_alias} ON {coh_alias}.hadm_id = {md_alias}.{hadm_col_in_temp} " # 主键通常是 hadm_id
-                "ORDER BY RANDOM() LIMIT {limit};" # 修改为随机预览
+                "LEFT JOIN MergedDataCTE {md_alias} ON {coh_alias}.hadm_id = {md_alias}.{hadm_col_in_temp} " 
+                "ORDER BY RANDOM() LIMIT {limit};" 
             ).format(
                 data_gen_query=data_generation_query_part,
                 select_cols_list=pgsql.SQL(', ').join(preview_select_cols),
                 target_table=target_table_ident,
                 coh_alias=cohort_alias,
                 md_alias=md_alias,
-                hadm_col_in_temp=cte_hadm_id_for_grouping, # MergedDataCTE中用于join的hadm_id
+                hadm_col_in_temp=cte_hadm_id_for_grouping, 
                 limit=pgsql.Literal(preview_limit)
             )
             return preview_sql, None, params_for_cte, generated_column_details_for_preview
-
-
+            
     # --- 数据库连接管理 (主Tab层面) ---
     def _connect_main_db(self):
         # 这个方法用于主Tab执行可能需要的、非面板特定的数据库操作
