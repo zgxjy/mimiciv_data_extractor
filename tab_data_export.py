@@ -6,7 +6,6 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
 from PySide6.QtCore import Qt, Slot
 import psycopg2
 import psycopg2.sql as pgsql
-import csv
 import os
 import pandas as pd
 
