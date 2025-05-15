@@ -33,6 +33,7 @@ class StructureTab(QWidget):
         self.view_btn.setEnabled(enabled)
 
     def view_db_structure(self):
+        print("StructureTab.view_db_structure() called via on_db_connected or refresh button")
         self.tree.clear()
         db_params = self.get_db_params()
         if not db_params:

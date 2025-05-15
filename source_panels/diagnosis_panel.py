@@ -22,6 +22,7 @@ class DiagnosisConfigPanel(BaseSourceConfigPanel):
 
         # search_field_hint_label 和 condition_widget 由主面板创建和管理
         self.condition_widget = ConditionGroupWidget(is_root=True) # search_field 会在 populate_panel_if_needed 中设置
+        self.condition_widget.condition_changed.connect(self.config_changed_signal.emit) 
         filter_group_layout.addWidget(self.condition_widget)
 
         cg_scroll_area_panel = QScrollArea()
@@ -30,12 +31,14 @@ class DiagnosisConfigPanel(BaseSourceConfigPanel):
         cg_scroll_area_panel.setMinimumHeight(200)
         filter_group_layout.addWidget(cg_scroll_area_panel) # 添加滚动区域 
         
-        self.filter_items_btn = QPushButton("筛选诊断项目")
+        # -- 修改开始 --
+        filter_action_layout = QHBoxLayout() # 创建一个新的 QHBoxLayout
+        filter_action_layout.addStretch()      # 将按钮推到右边
+        self.filter_items_btn = QPushButton("筛选指标项目") # 或者 "筛选化验项目" 等
         self.filter_items_btn.clicked.connect(self._filter_items_action)
-        filter_action_layout = QHBoxLayout()
-        filter_action_layout.addStretch()
         filter_action_layout.addWidget(self.filter_items_btn)
-        filter_group_layout.addLayout(filter_action_layout)
+        filter_group_layout.addLayout(filter_action_layout) # 将这个 QHBoxLayout 添加到 filter_group_layout
+        # -- 修改结束 --
         
         self.item_list = QListWidget()
         self.item_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -143,7 +146,14 @@ class DiagnosisConfigPanel(BaseSourceConfigPanel):
         finally:
             self.filter_items_btn.setEnabled(True); self._close_panel_db(); self.config_changed_signal.emit()
     def update_panel_action_buttons_state(self, general_config_ok: bool):
-        can_filter = general_config_ok and self.condition_widget.has_valid_input()
+        # general_config_ok: 表示主 Tab 的通用配置是否OK（数据库已连接，队列表已选择）
+        # has_valid_conditions_in_panel: 表示此面板内的 ConditionGroupWidget 是否有有效输入
+        has_valid_conditions_in_panel = self.condition_widget.has_valid_input()
+        
+        # 筛选按钮的可用性取决于通用配置OK 并且 面板内的条件组有有效输入
+        can_filter = general_config_ok and has_valid_conditions_in_panel
+        
+        print(f"DEBUG Panel {self.__class__.__name__}: general_ok={general_config_ok}, panel_conditions_ok={has_valid_conditions_in_panel}, can_filter={can_filter}")
         self.filter_items_btn.setEnabled(can_filter)
 
 # --- END OF FILE source_panels/diagnosis_panel.py ---

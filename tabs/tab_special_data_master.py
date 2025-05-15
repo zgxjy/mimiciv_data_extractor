@@ -1,10 +1,10 @@
 # --- START OF FILE tab_special_data_master.py ---
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QGridLayout,
                           QTableWidget, QTableWidgetItem, QMessageBox, QLabel,
-                          QSplitter, QTextEdit, QComboBox, QGroupBox,
+                          QTextEdit, QComboBox, QGroupBox, # QSplitter 被移除
                           QRadioButton, QButtonGroup, QStackedWidget,
-                          QLineEdit, QProgressBar, QAbstractItemView, QApplication)
-# QCheckBox 不再直接在主Tab中使用，它们在UI组件里
+                          QLineEdit, QProgressBar, QAbstractItemView, QApplication,
+                          QScrollArea) # QScrollArea 保持导入
 from PySide6.QtCore import Qt, Signal, Slot, QObject, QThread
 import psycopg2
 import psycopg2.sql as pgsql
@@ -12,16 +12,16 @@ import re
 import pandas as pd
 import time
 import traceback
-from source_panels.base_panel import BaseSourceConfigPanel # 仍然需要，但主要是为了类型提示
+from source_panels.base_panel import BaseSourceConfigPanel 
 from source_panels.chartevents_panel import CharteventsConfigPanel
 from source_panels.labevents_panel import LabeventsConfigPanel
 from source_panels.medication_panel import MedicationConfigPanel
 from source_panels.procedure_panel import ProcedureConfigPanel
 from source_panels.diagnosis_panel import DiagnosisConfigPanel
-from sql_logic.sql_builder_special import build_special_data_sql # 导入SQL构建函数
-from utils import sanitize_name_part
+from sql_logic.sql_builder_special import build_special_data_sql 
+from utils import sanitize_name_part, validate_column_name 
 
-# (MergeSQLWorker 类代码保持不变，直接复制过来)
+# (MergeSQLWorker 类代码保持不变)
 class MergeSQLWorker(QObject):
     finished = Signal()
     error = Signal(str)
@@ -91,14 +91,27 @@ class SpecialDataMasterTab(QWidget):
         self.merge_worker = None
         self.config_panels = {}
         self.init_ui()
-        self.rb_chartevents.setChecked(True) # 默认选中并触发初始更新
+        self.rb_chartevents.setChecked(True) 
 
     def init_ui(self):
-        main_layout = QVBoxLayout(self)
-        splitter = QSplitter(Qt.Orientation.Vertical); main_layout.addWidget(splitter)
-        config_widget = QWidget(); config_layout = QVBoxLayout(config_widget)
-        config_layout.setContentsMargins(10,10,10,10); config_layout.setSpacing(10)
-        splitter.addWidget(config_widget)
+        # 主布局，只包含一个 QScrollArea
+        main_layout = QVBoxLayout(self) 
+        self.setLayout(main_layout) # 设置主布局到 SpecialDataMasterTab
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        main_layout.addWidget(scroll_area) # QScrollArea 充满整个标签页
+
+        # 内容 Widget，所有 UI 元素都将添加到这个 Widget 的布局中
+        content_widget = QWidget()
+        scroll_area.setWidget(content_widget) # 将内容 Widget 设置到滚动区域
+
+        # content_layout 是内容 Widget 的布局
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(10,10,10,10)
+        content_layout.setSpacing(10)
+
+        # --- 从这里开始，所有之前的 UI 元素都添加到 content_layout ---
 
         # 1. 目标队列表
         cohort_group = QGroupBox("1. 选择目标队列数据表")
@@ -109,7 +122,7 @@ class SpecialDataMasterTab(QWidget):
         cohort_layout.addWidget(self.table_combo)
         self.refresh_btn = QPushButton("刷新列表"); self.refresh_btn.clicked.connect(self.refresh_cohort_tables); self.refresh_btn.setEnabled(False)
         cohort_layout.addWidget(self.refresh_btn); cohort_layout.addStretch()
-        config_layout.addWidget(cohort_group)
+        content_layout.addWidget(cohort_group)
 
         # 2. 数据来源选择 和 特定配置面板
         source_and_panel_group = QGroupBox("2. 选择数据来源并配置提取项")
@@ -131,12 +144,14 @@ class SpecialDataMasterTab(QWidget):
         self.search_field_hint_label = QLabel()
         self.search_field_hint_label.setStyleSheet("font-style: italic; color: gray;")
         source_main_layout.addWidget(self.search_field_hint_label)
+        
         self.config_panel_stack = QStackedWidget()
+        self.config_panel_stack.setMinimumHeight(450) # 给面板一个合理的最小高度
         source_main_layout.addWidget(self.config_panel_stack)
         self._create_config_panels()
-        config_layout.addWidget(source_and_panel_group)
+        content_layout.addWidget(source_and_panel_group)
 
-        # 3. 新列基础名 (这是唯一保留在主Tab的“通用逻辑”UI元素)
+        # 3. 新列基础名
         column_name_group = QGroupBox("3. 定义新列基础名")
         column_name_layout = QHBoxLayout(column_name_group)
         column_name_layout.addWidget(QLabel("新列基础名 (可修改):"))
@@ -144,17 +159,19 @@ class SpecialDataMasterTab(QWidget):
         self.new_column_name_input.setPlaceholderText("根据选择自动生成或手动输入...")
         self.new_column_name_input.textChanged.connect(self._on_master_config_changed)
         column_name_layout.addWidget(self.new_column_name_input, 1)
-        config_layout.addWidget(column_name_group)
+        content_layout.addWidget(column_name_group)
 
-        # 执行状态组 和 操作按钮 (保持不变)
-        self.execution_status_group = QGroupBox("合并执行状态") # ... (内部结构不变)
+        # 执行状态组
+        self.execution_status_group = QGroupBox("合并执行状态") 
         execution_status_layout = QVBoxLayout(self.execution_status_group)
         self.execution_progress = QProgressBar(); self.execution_progress.setRange(0,4); self.execution_progress.setValue(0)
         execution_status_layout.addWidget(self.execution_progress)
         self.execution_log = QTextEdit(); self.execution_log.setReadOnly(True); self.execution_log.setMaximumHeight(100)
         execution_status_layout.addWidget(self.execution_log)
         self.execution_status_group.setVisible(False)
-        config_layout.addWidget(self.execution_status_group)
+        content_layout.addWidget(self.execution_status_group)
+        
+        # 操作按钮
         action_layout = QHBoxLayout()
         self.preview_merge_btn = QPushButton("预览待合并数据"); self.preview_merge_btn.clicked.connect(self.preview_merge_data); self.preview_merge_btn.setEnabled(False)
         action_layout.addWidget(self.preview_merge_btn)
@@ -162,25 +179,28 @@ class SpecialDataMasterTab(QWidget):
         action_layout.addWidget(self.execute_merge_btn)
         self.cancel_merge_btn = QPushButton("取消合并"); self.cancel_merge_btn.clicked.connect(self.cancel_merge); self.cancel_merge_btn.setEnabled(False)
         action_layout.addWidget(self.cancel_merge_btn)
-        config_layout.addLayout(action_layout)
+        content_layout.addLayout(action_layout)
 
-        # 下方结果预览区域 (保持不变)
-        result_widget = QWidget() # ... (内部结构不变)
-        result_layout = QVBoxLayout(result_widget)
-        result_layout.setContentsMargins(10, 10, 10, 10); result_layout.setSpacing(10)
-        splitter.addWidget(result_widget)
-        result_layout.addWidget(QLabel("SQL预览 (仅供参考):"))
-        self.sql_preview = QTextEdit(); self.sql_preview.setReadOnly(True); self.sql_preview.setMaximumHeight(120)
-        result_layout.addWidget(self.sql_preview)
-        result_layout.addWidget(QLabel("数据预览 (最多100条):"))
+        # SQL预览
+        content_layout.addWidget(QLabel("SQL预览 (仅供参考):"))
+        self.sql_preview = QTextEdit(); self.sql_preview.setReadOnly(True)
+        self.sql_preview.setMinimumHeight(100) # 给SQL预览一个最小高度
+        self.sql_preview.setMaximumHeight(200) # 也可设置最大高度
+        content_layout.addWidget(self.sql_preview)
+
+        # 数据预览
+        content_layout.addWidget(QLabel("数据预览 (最多100条):"))
         self.preview_table = QTableWidget(); self.preview_table.setAlternatingRowColors(True); self.preview_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        result_layout.addWidget(self.preview_table)
-        splitter.setSizes([650, 350]) # 调整初始比例
+        self.preview_table.setMinimumHeight(200) # 给数据表一个最小高度
+        # self.preview_table.setFixedHeight(300) # 或者固定高度，如果希望它不随内容变化
+        content_layout.addWidget(self.preview_table)
+        
+        # --- 结束 content_layout 的添加 ---
 
         self.source_selection_group.buttonToggled.connect(self._on_source_type_changed)
-        # self.rb_chartevents.setChecked(True) # 移到 __init__ 末尾确保所有UI都已创建
-
-    def _create_config_panels(self): # (与上一个回复版本相同)
+        
+    # ... (其他方法 _create_config_panels, _update_active_panel, 等保持不变) ...
+    def _create_config_panels(self): 
         panels_to_create = [
             (self.SOURCE_CHARTEVENTS, CharteventsConfigPanel),
             (self.SOURCE_LABEVENTS, LabeventsConfigPanel),
@@ -194,7 +214,7 @@ class SpecialDataMasterTab(QWidget):
             self.config_panel_stack.addWidget(panel)
             self.config_panels[source_id] = panel
             
-    def _update_active_panel(self): # (与上一个回复版本相同)
+    def _update_active_panel(self): 
         current_id = self.source_selection_group.checkedId()
         active_panel = self.config_panels.get(current_id)
         if active_panel:
@@ -208,24 +228,21 @@ class SpecialDataMasterTab(QWidget):
         else:
             self.search_field_hint_label.setText("请选择一个数据来源。")
 
-    @Slot(int, bool) # 确保槽函数签名与信号匹配
-    def _on_source_type_changed(self, id, checked): # (与上一个回复版本相同)
+    @Slot(int, bool) 
+    def _on_source_type_changed(self, id, checked): 
         if checked: self._update_active_panel()
 
     @Slot()
-    def _on_panel_config_changed(self): # (与上一个回复版本相同)
+    def _on_panel_config_changed(self): 
         self._generate_and_set_default_col_name()
         self.update_master_action_buttons_state()
 
     @Slot()
-    def _on_master_config_changed(self): # (与上一个回复版本相同)
+    def _on_master_config_changed(self): 
         self._generate_and_set_default_col_name()
         self.update_master_action_buttons_state()
         
-    # _update_common_logic_ui_visibility 方法可以移除了，因为通用UI已移到面板的子组件
-    # def _update_common_logic_ui_visibility(self): ...
-
-    def _generate_and_set_default_col_name(self): # (与上一个回复版本相同，它现在从活动面板的子组件获取信息)
+    def _generate_and_set_default_col_name(self): 
         parts = []
         active_panel = self.config_panels.get(self.source_selection_group.checkedId())
         if not active_panel: self.new_column_name_input.setText("new_col"); return
@@ -273,15 +290,15 @@ class SpecialDataMasterTab(QWidget):
             self.new_column_name_input.blockSignals(True); self.new_column_name_input.setText(final_name); self.new_column_name_input.blockSignals(False)
         self.update_master_action_buttons_state()
 
-    def _are_configs_valid_for_action(self) -> bool: # (与上一个回复版本相同)
+    def _are_configs_valid_for_action(self) -> bool: 
         if not self.selected_cohort_table: return False
         col_name_text = self.new_column_name_input.text()
-        is_valid_col_name, _ = self._validate_column_name(col_name_text)
+        is_valid_col_name, _ = validate_column_name(col_name_text)
         if not is_valid_col_name: return False
         active_panel = self.config_panels.get(self.source_selection_group.checkedId())
         if not active_panel or not active_panel.get_selected_item_ids(): return False
         any_method_selected = False
-        if hasattr(active_panel, 'value_agg_widget') and hasattr(active_panel.value_agg_widget, 'get_selected_methods'): # Check if widget and method exist
+        if hasattr(active_panel, 'value_agg_widget') and hasattr(active_panel.value_agg_widget, 'get_selected_methods'): 
             any_method_selected = any(active_panel.value_agg_widget.get_selected_methods().values())
         elif hasattr(active_panel, 'event_output_widget') and hasattr(active_panel.event_output_widget, 'get_selected_outputs'):
             any_method_selected = any(active_panel.event_output_widget.get_selected_outputs().values())
@@ -289,11 +306,10 @@ class SpecialDataMasterTab(QWidget):
         any_panel_method_selected = any(panel_specific_methods.values()) if panel_specific_methods else False
         return any_method_selected or any_panel_method_selected
 
-    # _build_merge_query, execute_merge, preview_merge_data, 等方法与上一个回复中调用 build_special_data_sql 的版本保持一致
     def _build_merge_query(self, preview_limit=100, for_execution=False):
         if not self.selected_cohort_table: return None, "未选择目标队列数据表.", [], []
         base_new_col_name = self.new_column_name_input.text().strip()
-        is_valid_base_name, name_error = self._validate_column_name(base_new_col_name)
+        is_valid_base_name, name_error = validate_column_name(base_new_col_name)
         if not is_valid_base_name: return None, f"基础列名错误: {name_error}", [], []
         active_panel_id = self.source_selection_group.checkedId()
         active_panel = self.config_panels.get(active_panel_id)
@@ -313,8 +329,6 @@ class SpecialDataMasterTab(QWidget):
             print(error_msg)
             return None, error_msg, [], []
 
-    # 其他方法 (prepare_for_long_operation, on_db_connected, refresh_cohort_tables, etc.)
-    # 与上一个回复中的 SpecialDataMasterTab 版本保持一致
     def prepare_for_long_operation(self, starting=True):
         is_enabled = not starting
         if starting:
@@ -323,7 +337,7 @@ class SpecialDataMasterTab(QWidget):
             self.execution_log.clear()
             self.update_execution_log("开始执行合并操作...")
         self.table_combo.setEnabled(is_enabled); self.refresh_btn.setEnabled(is_enabled)
-        for rb_button in self.source_selection_group.buttons(): rb_button.setEnabled(is_enabled) # Corrected iteration
+        for rb_button in self.source_selection_group.buttons(): rb_button.setEnabled(is_enabled) 
         active_panel = self.config_panels.get(self.source_selection_group.checkedId())
         if active_panel: active_panel.setEnabled(is_enabled)
         self.new_column_name_input.setEnabled(is_enabled)
@@ -340,8 +354,12 @@ class SpecialDataMasterTab(QWidget):
 
     @Slot()
     def on_db_connected(self):
-        self.refresh_btn.setEnabled(True); self.refresh_cohort_tables()
-        # self._generate_and_set_default_col_name() # on_cohort_table_selected -> update_master_action_buttons_state会触发
+        self.refresh_btn.setEnabled(True)
+        self.refresh_cohort_tables() # refresh_cohort_tables 会间接触发 on_cohort_table_selected
+                                    # on_cohort_table_selected 已经调用了 update_master_action_buttons_state
+        # self.update_master_action_buttons_state() # 因此，这里可能不需要重复调用，但为了保险可以加上
+        print("DEBUG Master: on_db_connected called, ensuring button states update.")
+        
 
     def refresh_cohort_tables(self):
         db_params = self.get_db_params(); conn = None
@@ -365,16 +383,22 @@ class SpecialDataMasterTab(QWidget):
         self.update_master_action_buttons_state()
         
     @Slot()
-    def update_master_action_buttons_state(self): # (与上一个回复版本相同)
-        is_valid = self._are_configs_valid_for_action()
-        self.preview_merge_btn.setEnabled(is_valid)
-        self.execute_merge_btn.setEnabled(is_valid)
+    def update_master_action_buttons_state(self): 
+        is_valid_for_merge_preview = self._are_configs_valid_for_action()
+        self.preview_merge_btn.setEnabled(is_valid_for_merge_preview)
+        self.execute_merge_btn.setEnabled(is_valid_for_merge_preview)
+        
         active_panel = self.config_panels.get(self.source_selection_group.checkedId())
         if active_panel:
-            general_ok = bool(self.get_db_params()) 
-            active_panel.update_panel_action_buttons_state(general_ok) # 让面板更新自己的按钮（如筛选按钮）
+            # general_config_ok 应该同时考虑数据库连接和队列表选择
+            db_connected = bool(self.get_db_params())
+            cohort_table_selected = bool(self.selected_cohort_table)
+            general_ok_for_panel_filter = db_connected and cohort_table_selected
+            
+            print(f"DEBUG Master: Passing general_ok_for_panel_filter={general_ok_for_panel_filter} to panel {active_panel.__class__.__name__}")
+            active_panel.update_panel_action_buttons_state(general_ok_for_panel_filter)
 
-    def execute_merge(self): # (与上一个回复版本相同)
+    def execute_merge(self): 
         if not self._are_configs_valid_for_action(): QMessageBox.warning(self, "配置不完整", "请确保所有必要的选项已选择或填写。"); return
         build_result = self._build_merge_query(for_execution=True)
         if build_result is None or len(build_result) < 4: QMessageBox.critical(self, "内部错误", "构建合并查询时未能返回预期结果。"); return
@@ -385,7 +409,7 @@ class SpecialDataMasterTab(QWidget):
         if QMessageBox.question(self, '确认操作', column_preview_message, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No: return
         db_params = self.get_db_params()
         if not db_params: QMessageBox.critical(self, "合并失败", "无法获取数据库连接参数。"); return
-        preview_text = f"-- 准备为表 {self.selected_cohort_table} 添加列: {new_cols_desc_for_worker} --"; self.sql_preview.setText(preview_text); QApplication.processEvents() # Simplified preview for brevity
+        preview_text = f"-- 准备为表 {self.selected_cohort_table} 添加列: {new_cols_desc_for_worker} --"; self.sql_preview.setText(preview_text); QApplication.processEvents() 
         self.prepare_for_long_operation(True)
         self.merge_worker = MergeSQLWorker(db_params, execution_steps_list, self.selected_cohort_table, new_cols_desc_for_worker)
         self.worker_thread = QThread(); self.merge_worker.moveToThread(self.worker_thread)
@@ -396,7 +420,7 @@ class SpecialDataMasterTab(QWidget):
         self.worker_thread.finished.connect(self.trigger_preview_after_thread_finish); self.worker_thread.finished.connect(self.worker_thread.deleteLater); self.worker_thread.finished.connect(lambda: setattr(self, 'merge_worker', None))
         self.worker_thread.start()
 
-    def preview_merge_data(self): # (与上一个回复版本相同)
+    def preview_merge_data(self): 
         if not self._are_configs_valid_for_action(): QMessageBox.warning(self, "配置不完整", "请确保所有必要的选项已选择或填写以进行预览。"); return
         db_params = self.get_db_params()
         if not db_params: QMessageBox.warning(self, "未连接", "请先连接数据库。"); return
@@ -420,10 +444,10 @@ class SpecialDataMasterTab(QWidget):
         finally:
             if conn_for_preview: conn_for_preview.close()
     
-    def _get_readable_sql_with_conn(self, sql_obj_or_str, params_list, conn): # (与上一个回复版本相同)
+    def _get_readable_sql_with_conn(self, sql_obj_or_str, params_list, conn): 
         if not conn or conn.closed:
             try: sql_template = str(sql_obj_or_str.as_string(psycopg2.connect(dbname='dummy')) if hasattr(sql_obj_or_str, 'as_string') else str(sql_obj_or_str))
-            except: sql_template = str(sql_obj_or_str) # Fallback if dummy connection fails
+            except: sql_template = str(sql_obj_or_str) 
             try: return sql_template % tuple(f"'{p}'" if isinstance(p, str) else p for p in params_list) if params_list else sql_template
             except: return f"{sql_template} -- Parameters: {params_list} (basic formatting failed)"
         try:
@@ -435,29 +459,29 @@ class SpecialDataMasterTab(QWidget):
             base_sql_str = sql_obj_or_str.as_string(conn) if hasattr(sql_obj_or_str, 'as_string') else str(sql_obj_or_str)
             return f"{base_sql_str}\n-- PARAMETERS: {params_list} (Mogrify failed with conn)"
 
-    def cancel_merge(self): # (与上一个回复版本相同)
+    def cancel_merge(self): 
         if self.merge_worker: self.update_execution_log("正在请求取消合并操作..."); self.merge_worker.cancel(); self.cancel_merge_btn.setEnabled(False) 
 
     @Slot()
-    def on_merge_worker_finished_actions(self): # (与上一个回复版本相同)
+    def on_merge_worker_finished_actions(self): 
         base_name_for_log = self.new_column_name_input.text()
         self.update_execution_log(f"成功向表 {self.selected_cohort_table} 添加/更新与 '{base_name_for_log}' 相关的列。")
         QMessageBox.information(self, "合并成功", f"已成功向表 {self.selected_cohort_table} 添加/更新与 '{base_name_for_log}' 相关的列。")
         self.prepare_for_long_operation(False)
 
     @Slot()
-    def trigger_preview_after_thread_finish(self): # (与上一个回复版本相同)
+    def trigger_preview_after_thread_finish(self): 
         if self.selected_cohort_table: self.request_preview_signal.emit('mimiciv_data', self.selected_cohort_table)
         else: print("Worker thread finished, but no table selected for preview.")
         
     @Slot(str)
-    def on_merge_error_actions(self, error_message): # (与上一个回复版本相同)
+    def on_merge_error_actions(self, error_message): 
         self.update_execution_log(f"合并失败: {error_message}")
         if "操作已取消" not in error_message: QMessageBox.critical(self, "合并失败", f"执行合并SQL失败: {error_message}")
         else: QMessageBox.information(self, "操作取消", "数据合并操作已取消。")
         self.prepare_for_long_operation(False)
         
-    def closeEvent(self, event): # (与上一个回复版本相同)
+    def closeEvent(self, event): 
         if self.worker_thread and self.worker_thread.isRunning():
              self.update_execution_log("正在尝试停止合并操作...")
              if self.merge_worker: self.merge_worker.cancel()

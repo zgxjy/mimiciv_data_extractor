@@ -18,7 +18,8 @@ class MedicalDataExtractor(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("医学数据提取与处理工具 - MIMIC-IV")
-        self.setGeometry(100, 100, 900, 850) # 原始大小，可能需要根据内容调整
+        self.setGeometry(100, 100, 900, 780) # 尝试一个稍小的高度，例如 780 或 750
+        self.setMinimumSize(850, 650) # 设置一个合理的最小尺寸
 
         # icon.ico 与 medical_data_extractor.py 在同一目录
         icon_path = "assets/icons/icon.ico" # 确保你有这个图标文件，或者注释掉这行
@@ -55,17 +56,20 @@ class MedicalDataExtractor(QMainWindow):
     @Slot()
     def on_db_connected(self):
         print("Database connected signal received by main window.")
-        # 启用/调用每个tab的on_db_connected（如果存在）
-        # 这样更通用，并且可以按tab的顺序初始化
+
+        # 1. 专门处理 StructureTab 的初始化
+        if self.structure_tab: # 确保 structure_tab 已实例化
+            print("Initializing StructureTab on DB connect...") # 调试信息
+            self.structure_tab.set_btn_enabled(True)
+            self.structure_tab.view_db_structure() # 自动刷新结构
+
+        # 2. 通用处理其他所有 Tab 的 on_db_connected (如果它们有的话)
         for i in range(self.tabs.count()):
             tab_widget = self.tabs.widget(i)
-            if hasattr(tab_widget, 'on_db_connected'):
-                # 对于StructureTab，它有自己的set_btn_enabled和view_db_structure
-                if tab_widget == self.structure_tab:
-                    self.structure_tab.set_btn_enabled(True)
-                    self.structure_tab.view_db_structure() # 自动刷新结构
-                else:
-                    tab_widget.on_db_connected()
+            # 避免重复处理 StructureTab，并且只调用其他 Tab 的 on_db_connected
+            if tab_widget != self.structure_tab and hasattr(tab_widget, 'on_db_connected'):
+                print(f"Calling on_db_connected for tab: {tab_widget.__class__.__name__}") # 调试信息
+                tab_widget.on_db_connected()
 
 
     @Slot(str, str)

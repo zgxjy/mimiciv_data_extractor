@@ -4,14 +4,14 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                           QTableWidget, QTableWidgetItem, QMessageBox, QLabel,
                           QSplitter, QTextEdit, QDialog, QLineEdit, QFormLayout,
                           QApplication, QProgressBar, QGroupBox, QComboBox,
-                          QRadioButton, QButtonGroup, QScrollArea,QGroupBox) # 增加了 QScrollArea
+                          QRadioButton, QButtonGroup, QScrollArea, QAbstractButton) # 增加了 QScrollArea, QAbstractButton
 from PySide6.QtCore import Qt, Signal, QObject, QThread, Slot
 import psycopg2
 from psycopg2 import sql as psql
 import re
 import time
 import traceback
-from ui_components.conditiongroup import ConditionGroupWidget # ConditionGroupWidget 现在没有 search_field 初始化参数
+from ui_components.conditiongroup import ConditionGroupWidget 
 
 # --- Constants for Cohort Types (Admission criteria) ---
 COHORT_TYPE_FIRST_EVENT_STR = "首次事件入院 (基于该事件的患者首次入院)"
@@ -24,6 +24,7 @@ MODE_DISEASE_KEY = "disease"
 MODE_PROCEDURE_KEY = "procedure"
 
 class CohortCreationWorker(QObject):
+    # ... (CohortCreationWorker 类代码保持不变) ...
     finished = Signal(str, int) # table_name, count
     error = Signal(str)
     progress = Signal(int, int) # current_step, total_steps
@@ -47,13 +48,13 @@ class CohortCreationWorker(QObject):
 
     def run(self):
         conn = None
-        total_steps = 6 # 1.Schema, 2.EventTemp, 3.ICUTemp, 4.TargetTable, 5.Indexes, 6.Commit/Count
+        total_steps = 6 
         current_step = 0
 
         event_table_full_name = self.source_mode_details["event_table"]
         dictionary_table_full_name = self.source_mode_details["dictionary_table"]
-        event_code_col_name = self.source_mode_details["event_icd_col"] # Name of the code column in event_table
-        dict_code_col_name = self.source_mode_details["dict_icd_col"]   # Name of the code column in dictionary_table
+        event_code_col_name = self.source_mode_details["event_icd_col"] 
+        dict_code_col_name = self.source_mode_details["dict_icd_col"]   
         event_seq_num_col_name = self.source_mode_details["event_seq_num_col"]
         event_time_col_name = self.source_mode_details.get("event_time_col")
         event_source_type_str = self.source_mode_details["source_type"]
@@ -77,7 +78,7 @@ class CohortCreationWorker(QObject):
             conn.autocommit = False
             self.log.emit("数据库已连接。")
 
-            current_step += 1 # Step 1
+            current_step += 1 
             self.log.emit(f"步骤 {current_step}/{total_steps}: 确保 'mimiciv_data' schema 存在...")
             cur.execute("CREATE SCHEMA IF NOT EXISTS mimiciv_data;")
             self.progress.emit(current_step, total_steps)
@@ -87,7 +88,7 @@ class CohortCreationWorker(QObject):
             selected_event_ad_temp_ident = psql.Identifier('selected_event_ad_temp_cohort_q')
             first_icu_stays_temp_ident = psql.Identifier('first_icu_stays_temp_cohort_q')
             
-            current_step += 1 # Step 2
+            current_step += 1 
             self.log.emit(f"步骤 {current_step}/{total_steps}: 创建临时表 (符合事件条件的入院记录)...")
 
             base_event_select_list = [
@@ -155,7 +156,7 @@ class CohortCreationWorker(QObject):
             self.progress.emit(current_step, total_steps)
             if self.is_cancelled: raise InterruptedError("操作已取消")
 
-            current_step += 1 # Step 3
+            current_step += 1 
             self.log.emit(f"步骤 {current_step}/{total_steps}: 创建临时表 (首次ICU入住)...")
             create_first_icu_stay_for_admission_sql = psql.SQL("""
                 DROP TABLE IF EXISTS {temp_table_ident};
@@ -172,7 +173,7 @@ class CohortCreationWorker(QObject):
             self.progress.emit(current_step, total_steps)
             if self.is_cancelled: raise InterruptedError("操作已取消")
 
-            current_step += 1 # Step 4
+            current_step += 1 
             self.log.emit(f"步骤 {current_step}/{total_steps}: 创建目标队列数据表 {self.target_table_name_str}...")
             
             target_select_list = [
@@ -230,7 +231,7 @@ class CohortCreationWorker(QObject):
             self.progress.emit(current_step, total_steps)
             if self.is_cancelled: raise InterruptedError("操作已取消")
 
-            current_step += 1 # Step 5
+            current_step += 1 
             self.log.emit(f"步骤 {current_step}/{total_steps}: 为表 {self.target_table_name_str} 创建索引...")
             idx_prefix_base = f"{event_source_type_str}_{self.target_table_name_str.replace('first_', '').replace('all_', '').replace('_admissions', '')}"[:15]
             indexes_to_create = [
@@ -258,7 +259,7 @@ class CohortCreationWorker(QObject):
             self.log.emit("所有索引创建完毕。")
             self.progress.emit(current_step, total_steps)
 
-            current_step += 1 # Step 6
+            current_step += 1 
             self.log.emit(f"步骤 {current_step}/{total_steps}: 正在提交更改并获取行数...")
             cur.execute(psql.SQL("DROP TABLE IF EXISTS {temp_table_ident};").format(temp_table_ident=first_icu_stays_temp_ident))
             cur.execute(psql.SQL("DROP TABLE IF EXISTS {temp_table_ident};").format(temp_table_ident=selected_event_ad_temp_ident))
@@ -293,9 +294,9 @@ class QueryCohortTab(QWidget):
         self.last_query_params = None
         self.cohort_worker_thread = None
         self.cohort_worker = None
-        self.current_mode_key = MODE_DISEASE_KEY # Default
+        self.current_mode_key = MODE_DISEASE_KEY 
         self.init_ui()
-        # self.on_mode_changed() # 会在 init_ui 中通过 setChecked 触发，或在最后显式调用
+        
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -313,12 +314,14 @@ class QueryCohortTab(QWidget):
         self.rb_mode_procedure = QRadioButton("按手术/操作ICD筛选")
         self.mode_selection_group.addButton(self.rb_mode_disease, 1)
         self.mode_selection_group.addButton(self.rb_mode_procedure, 2)
-        # self.rb_mode_disease.setChecked(True) # 移到 init_ui 末尾或通过 on_mode_changed 初始调用
+        
         mode_layout.addWidget(self.rb_mode_disease); mode_layout.addWidget(self.rb_mode_procedure)
         mode_selection_groupbox.setLayout(mode_layout)
         controls_and_preview_layout.addWidget(mode_selection_groupbox)
 
-        self.rb_mode_disease.toggled.connect(self._on_mode_radio_toggled) # 连接新的槽函数
+        # --- 修改信号连接 ---
+        # self.rb_mode_disease.toggled.connect(self._on_mode_radio_toggled) # 旧的连接
+        self.mode_selection_group.buttonToggled.connect(self._on_mode_button_group_toggled) # 新的连接
 
         instruction_label = QLabel("使用下方条件组构建筛选条件 (主要针对\"标题/描述\"列):")
         controls_and_preview_layout.addWidget(instruction_label)
@@ -329,7 +332,7 @@ class QueryCohortTab(QWidget):
         cg_scroll_area = QScrollArea()
         cg_scroll_area.setWidgetResizable(True)
         cg_scroll_area.setWidget(self.condition_group)
-        cg_scroll_area.setMinimumHeight(200) # 至少保证能看到几行
+        cg_scroll_area.setMinimumHeight(200) 
         controls_and_preview_layout.addWidget(cg_scroll_area)
 
         cohort_type_layout = QHBoxLayout()
@@ -371,20 +374,29 @@ class QueryCohortTab(QWidget):
         result_display_layout.addWidget(self.result_table)
         splitter.addWidget(result_display_widget)
         
-        splitter.setSizes([controls_and_preview_widget.sizeHint().height() + 50, 250]) # 尝试动态调整
+        splitter.setSizes([controls_and_preview_widget.sizeHint().height() + 50, 250]) 
         
-        self.rb_mode_disease.setChecked(True) # 在UI元素都创建完毕后设置，确保 on_mode_changed 能正确工作
-        # self.update_button_states() # on_mode_changed会调用它
+        self.rb_mode_disease.setChecked(True) 
+        
 
     def on_db_connected(self):
         self.update_button_states()
 
-    @Slot(bool)
-    def _on_mode_radio_toggled(self, checked):
+    # --- 新的槽函数 ---
+    @Slot(QAbstractButton, bool)
+    def _on_mode_button_group_toggled(self, button: QAbstractButton, checked: bool):
         if checked: # 只有当按钮被选中时才执行
+            # print(f"DEBUG: Mode button '{button.text()}' became checked. Calling on_mode_changed.")
             self.on_mode_changed()
 
+    # _on_mode_radio_toggled 方法可以被移除了，因为它不再被使用
+    # @Slot(bool)
+    # def _on_mode_radio_toggled(self, checked):
+    #     if checked: 
+    #         self.on_mode_changed()
+
     def on_mode_changed(self):
+        # print("DEBUG: on_mode_changed called.") # 添加调试打印
         self.result_table.setRowCount(0)
         self.sql_preview.clear()
         self.last_query_condition_template = None
@@ -396,11 +408,10 @@ class QueryCohortTab(QWidget):
             current_admission_type_key = self.admission_type_combo.currentData()
         self.admission_type_combo.clear()
 
-        available_fields_for_cg = [] # (db_col_name, display_name)
+        available_fields_for_cg = [] 
 
         if self.rb_mode_disease.isChecked():
             self.current_mode_key = MODE_DISEASE_KEY
-            # if hasattr(self, 'condition_group'): self.condition_group.set_search_field("long_title") # 旧逻辑
             self.query_btn.setText("查询疾病ICD")
             self.preview_btn.setText("预览疾病查询SQL")
             self.admission_type_label.setText("选择疾病入院类型:")
@@ -409,11 +420,11 @@ class QueryCohortTab(QWidget):
             self.dict_table_for_query = "mimiciv_hosp.d_icd_diagnoses"
             self.dict_code_col_for_query = "icd_code"
             self.dict_title_col_for_query = "long_title"
-            available_fields_for_cg = [("long_title", "标题/描述")] # 为ConditionGroupWidget设置可用字段
+            available_fields_for_cg = [("long_title", "标题/描述")] 
+            # print(f"DEBUG: Mode is DISEASE. dict_table_for_query = {self.dict_table_for_query}")
         
         elif self.rb_mode_procedure.isChecked():
             self.current_mode_key = MODE_PROCEDURE_KEY
-            # if hasattr(self, 'condition_group'): self.condition_group.set_search_field("long_title") # 旧逻辑
             self.query_btn.setText("查询手术/操作ICD")
             self.preview_btn.setText("预览手术查询SQL")
             self.admission_type_label.setText("选择手术/操作入院类型:")
@@ -422,12 +433,12 @@ class QueryCohortTab(QWidget):
             self.dict_table_for_query = "mimiciv_hosp.d_icd_procedures"
             self.dict_code_col_for_query = "icd_code"
             self.dict_title_col_for_query = "long_title"
-            available_fields_for_cg = [("long_title", "标题/描述")] # 为ConditionGroupWidget设置可用字段
+            available_fields_for_cg = [("long_title", "标题/描述")] 
+            # print(f"DEBUG: Mode is PROCEDURE. dict_table_for_query = {self.dict_table_for_query}")
 
-        # 更新 ConditionGroupWidget 的可用字段并清空
         if hasattr(self, 'condition_group'):
             self.condition_group.set_available_search_fields(available_fields_for_cg)
-            self.condition_group.clear_all() # 清空条件，因为可用字段列表或其上下文已改变
+            self.condition_group.clear_all() 
 
         if current_admission_type_key:
             idx = self.admission_type_combo.findData(current_admission_type_key)
@@ -435,9 +446,10 @@ class QueryCohortTab(QWidget):
         elif self.admission_type_combo.count() > 0:
             self.admission_type_combo.setCurrentIndex(0)
         
-        self.update_button_states() # 更新按钮状态
+        self.update_button_states() 
 
     def prepare_for_cohort_creation(self, starting=True):
+        # ... (此方法保持不变) ...
         self.cohort_creation_status_group.setVisible(starting)
         if starting:
             self.cohort_creation_progress.setValue(0)
@@ -445,38 +457,38 @@ class QueryCohortTab(QWidget):
             self.update_cohort_creation_log("开始创建队列...")
         
         is_enabled = not starting
-        # 更新按钮的启用状态，依赖于 update_button_states 的逻辑
         self.condition_group.setEnabled(is_enabled)
         self.admission_type_combo.setEnabled(is_enabled)
         self.rb_mode_disease.setEnabled(is_enabled)
         self.rb_mode_procedure.setEnabled(is_enabled)
         
-        if not starting: # 操作结束
+        if not starting: 
             self.cohort_worker = None
             self.cohort_worker_thread = None
         
-        # 总是调用 update_button_states 来决定按钮的最终状态
         self.update_button_states()
 
 
     def update_cohort_creation_progress(self, value, max_value):
+        # ... (此方法保持不变) ...
         if self.cohort_creation_progress.maximum() != max_value: self.cohort_creation_progress.setMaximum(max_value)
         self.cohort_creation_progress.setValue(value)
 
     def update_cohort_creation_log(self, message):
+        # ... (此方法保持不变) ...
         self.cohort_creation_log.append(message); QApplication.processEvents()
 
     def _can_create_table_check(self):
-        # 创建表的条件：有条件输入，并且上次查询的模板是有效的（非空，非"1=1"）
-        # 注意：self.last_query_condition_template 在 execute_query 中被设置
+        # ... (此方法保持不变) ...
         return (self.condition_group.has_valid_input() and
                 self.last_query_condition_template and 
                 self.last_query_condition_template.strip() and 
-                self.last_query_condition_template.lower() != "true" and # "TRUE"也可能是无意义的
+                self.last_query_condition_template.lower() != "true" and 
                 self.last_query_condition_template != "1=1")
 
 
     def update_button_states(self):
+        # ... (此方法保持不变) ...
         db_connected = bool(self.get_db_params())
         has_valid_conditions = self.condition_group.has_valid_input()
         is_worker_running = self.cohort_worker_thread is not None and self.cohort_worker_thread.isRunning()
@@ -484,22 +496,18 @@ class QueryCohortTab(QWidget):
         self.query_btn.setEnabled(db_connected and has_valid_conditions and not is_worker_running)
         self.preview_btn.setEnabled(db_connected and has_valid_conditions and not is_worker_running)
         
-        # 创建表的按钮依赖于 _can_create_table_check 的结果
         can_create = db_connected and self._can_create_table_check() and not is_worker_running
         self.create_table_btn.setEnabled(can_create)
 
         if not has_valid_conditions and not is_worker_running:
             self.sql_preview.setPlaceholderText("在此处将显示生成的SQL语句预览...")
-            # 如果没有有效条件，确保 last_query_condition_template 不会残留旧值导致创建按钮误判
-            # 但也不应该在这里随意清空它，它只应在 execute_query 时更新
             if not has_valid_conditions:
-                 self.create_table_btn.setEnabled(False) # 再次确保
+                 self.create_table_btn.setEnabled(False)
 
 
     def _build_query_parts(self):
+        # print(f"DEBUG: _build_query_parts - dict_table_for_query = {self.dict_table_for_query}") # 添加调试打印
         condition_template, params = self.condition_group.get_condition()
-        # 注意：这里的 dict_code_col_for_query 和 dict_title_col_for_query 是固定的
-        # 因为这个查询总是针对字典表（d_icd_diagnoses 或 d_icd_procedures）的特定列
         base_query = psql.SQL("SELECT {code_col}, {title_col} FROM {dict_table}").format(
             code_col=psql.Identifier(self.dict_code_col_for_query),
             title_col=psql.Identifier(self.dict_title_col_for_query),
@@ -508,14 +516,15 @@ class QueryCohortTab(QWidget):
         if condition_template:
             full_query = psql.SQL("{base} WHERE {condition}").format(
                 base=base_query, 
-                condition=psql.SQL(condition_template) # ConditionGroupWidget 返回的已经是 WHERE 之后的部分
+                condition=psql.SQL(condition_template) 
             )
         else:
-            full_query = base_query # 如果没有条件，查询整个表 (通常应有LIMIT)
+            full_query = base_query 
             params = []
         return full_query, params
 
     def preview_sql_action(self):
+        # ... (此方法保持不变) ...
         query_obj, params = self._build_query_parts()
         preview_sql_filled = "" 
         query_type_str = "疾病ICD" if self.current_mode_key == MODE_DISEASE_KEY else "手术/操作ICD"
@@ -523,8 +532,8 @@ class QueryCohortTab(QWidget):
         db_params = self.get_db_params()
 
         if not db_params:
-            try: # 尝试获取模板字符串，即使没有真实连接
-                dummy_conn = psycopg2.connect("dbname=dummy user=dummy") # 更完整的虚拟连接字符串
+            try: 
+                dummy_conn = psycopg2.connect("dbname=dummy user=dummy") 
                 query_template_for_mogrify = query_obj.as_string(dummy_conn) 
                 dummy_conn.close()
             except: query_template_for_mogrify = str(query_obj) 
@@ -552,32 +561,26 @@ class QueryCohortTab(QWidget):
             if temp_conn_for_preview:
                 temp_conn_for_preview.close()
 
+
     def execute_query(self):
+        # ... (此方法保持不变) ...
         db_params = self.get_db_params()
         if not db_params: QMessageBox.warning(self, "未连接", "请先连接数据库"); return
         
         query_obj, params = self._build_query_parts()
         
-        # 关键：在实际执行查询前，从 condition_group 获取最新的条件模板和参数
-        # 并将它们存储起来，供创建队列时使用。
         self.last_query_condition_template, self.last_query_params = self.condition_group.get_condition()
         if not self.last_query_condition_template and self.condition_group.has_valid_input():
-             # 如果有输入但 get_condition() 返回空（可能是一个空的根组但有子组未输入），
-             # 可以设为一个无害的条件，或者依赖按钮状态来阻止。
-             # 这里假设如果 has_valid_input 为 true，get_condition 会返回一些东西。
-             # 如果 get_condition 返回空字符串，表示没有有效的条件可以形成。
-             # self.last_query_condition_template = "TRUE" # 或者 "1=1"
-             pass # 依赖 update_button_states 中 _can_create_table_check 的判断
+             pass 
 
         query_type_str = "疾病ICD" if self.current_mode_key == MODE_DISEASE_KEY else "手术/操作ICD"
         self.table_content_label.setText(f"当前表格内容: {query_type_str} 代码查询结果")
-        self.preview_sql_action() # 更新SQL预览区以反映将要执行的查询
+        self.preview_sql_action() 
         
         conn = None
         try:
             conn = psycopg2.connect(**db_params)
             cur = conn.cursor()
-            # 使用从 _build_query_parts 获取的 query_obj 和 params 执行
             cur.execute(query_obj, params)
             columns = [desc[0] for desc in cur.description]; rows = cur.fetchall()
             
@@ -592,13 +595,14 @@ class QueryCohortTab(QWidget):
             QMessageBox.information(self, "查询完成", f"共找到 {len(rows)} 条 {query_type_str} 记录")
         except (Exception, psycopg2.Error) as error:
             QMessageBox.critical(self, "查询失败", f"无法执行 {query_type_str} 查询: {error}\n{traceback.format_exc()}")
-            self.last_query_condition_template = None # 查询失败，清除上次条件
+            self.last_query_condition_template = None 
             self.last_query_params = None
         finally:
             if conn: conn.close()
-            self.update_button_states() # 查询后更新按钮状态（特别是创建表按钮）
+            self.update_button_states() 
 
     def _get_source_mode_details(self):
+        # ... (此方法保持不变) ...
         if self.current_mode_key == MODE_DISEASE_KEY:
             return {
                 "source_type": MODE_DISEASE_KEY, "event_table": "mimiciv_hosp.diagnoses_icd",
@@ -618,7 +622,7 @@ class QueryCohortTab(QWidget):
     def _generate_cohort_creation_sql_preview(self, target_table_name_str,
                                              condition_sql_template_str, condition_params_list,
                                              admission_cohort_type, source_mode_details):
-        # (内容不变)
+        # ... (此方法保持不变) ...
         db_params = self.get_db_params()
         if not db_params: return False, "-- 数据库未连接，无法生成队列创建SQL预览。--"
         event_table_full = source_mode_details["event_table"]; dict_table_full = source_mode_details["dictionary_table"]
@@ -664,7 +668,8 @@ class QueryCohortTab(QWidget):
             if conn: conn.close()
 
 
-    def create_cohort_table_with_preview(self): # (逻辑基本不变)
+    def create_cohort_table_with_preview(self): 
+        # ... (此方法保持不变) ...
         if not self.last_query_condition_template or not self.condition_group.has_valid_input() or self.last_query_condition_template.strip() == "" or self.last_query_condition_template.lower() == "true" or self.last_query_condition_template == "1=1":
             QMessageBox.warning(self, "缺少有效查询条件", "请先通过“查询ICD”或“预览查询SQL”生成一个有效的、非空的查询条件。")
             self.sql_preview.setText("-- 无法创建队列：缺少有效的、具体的查询条件。")
@@ -691,7 +696,6 @@ class QueryCohortTab(QWidget):
         current_source_mode_details = self._get_source_mode_details()
         if not current_source_mode_details: QMessageBox.critical(self, "内部错误", "无法确定当前的筛选模式详情。"); return
         
-        # 使用 self.last_query_condition_template 和 self.last_query_params
         success, preview_sql_str = self._generate_cohort_creation_sql_preview(
             target_table_name_str, self.last_query_condition_template, self.last_query_params,
             selected_admission_type_key, current_source_mode_details)
@@ -727,12 +731,13 @@ class QueryCohortTab(QWidget):
         self.cohort_worker.finished.connect(self.cohort_worker_thread.quit)
         self.cohort_worker.error.connect(self.cohort_worker_thread.quit)
         self.cohort_worker_thread.finished.connect(self.cohort_worker_thread.deleteLater)
-        self.cohort_worker.finished.connect(lambda: setattr(self, 'cohort_worker', None)) # Clean up worker
-        self.cohort_worker.error.connect(lambda: setattr(self, 'cohort_worker', None)) # Clean up worker
+        self.cohort_worker.finished.connect(lambda: setattr(self, 'cohort_worker', None)) 
+        self.cohort_worker.error.connect(lambda: setattr(self, 'cohort_worker', None)) 
         self.cohort_worker_thread.start()
 
     @Slot(str, int)
     def on_cohort_creation_finished(self, table_name, count):
+        # ... (此方法保持不变) ...
         self.update_cohort_creation_log(f"队列数据表 {table_name} 创建成功，包含 {count} 条记录。")
         QMessageBox.information(self, "创建成功", f"队列数据表 {table_name} 创建成功，包含 {count} 条记录。")
         self.prepare_for_cohort_creation(False)
@@ -740,6 +745,7 @@ class QueryCohortTab(QWidget):
 
     @Slot(str)
     def on_cohort_creation_error(self, error_message):
+        # ... (此方法保持不变) ...
         self.update_cohort_creation_log(f"队列创建失败: {error_message}")
         if "操作已取消" not in error_message:
             QMessageBox.critical(self, "创建失败", f"无法创建队列数据表: {error_message}")
@@ -747,7 +753,8 @@ class QueryCohortTab(QWidget):
             QMessageBox.information(self, "操作取消", "队列创建操作已取消。")
         self.prepare_for_cohort_creation(False)
 
-    def preview_created_cohort_table(self, schema_name, table_name): # (内容不变)
+    def preview_created_cohort_table(self, schema_name, table_name): 
+        # ... (此方法保持不变) ...
         db_params = self.get_db_params()
         if not db_params: QMessageBox.warning(self, "预览失败", "数据库未连接。"); return
         conn = None
@@ -775,7 +782,8 @@ class QueryCohortTab(QWidget):
             if conn: conn.close()
 
 
-    def get_cohort_identifier_name(self): # (内容不变)
+    def get_cohort_identifier_name(self): 
+        # ... (此方法保持不变) ...
         dialog = QDialog(self); dialog.setWindowTitle("输入队列基础标识符")
         layout = QVBoxLayout(dialog); form_layout = QFormLayout(); name_input = QLineEdit()
         form_layout.addRow("队列基础标识符 (英文,数字,下划线):", name_input); layout.addLayout(form_layout)
@@ -786,7 +794,8 @@ class QueryCohortTab(QWidget):
         ok_btn.clicked.connect(dialog.accept); cancel_btn.clicked.connect(dialog.reject)
         result = dialog.exec_(); return name_input.text().strip(), result == QDialog.Accepted
 
-    def closeEvent(self, event): # (内容不变)
+    def closeEvent(self, event): 
+        # ... (此方法保持不变) ...
         if self.cohort_worker_thread and self.cohort_worker_thread.isRunning():
             if self.cohort_worker: self.cohort_worker.cancel()
             self.cohort_worker_thread.quit()

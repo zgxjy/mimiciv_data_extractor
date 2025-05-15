@@ -1,7 +1,9 @@
 # --- START OF PROPOSED MODIFICATION FOR conditiongroup.py ---
-
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QComboBox, QLabel, QFrame, QGroupBox)
 from PySide6.QtCore import Qt, Signal
+import psycopg2 # 需要导入
+from psycopg2 import sql as pgsql # 确保 pgsql 被正确导入和使用
+import re # re is not used in this file from the provided snippet, but good to keep if other parts use it.
 
 class ConditionGroupWidget(QWidget):
     condition_changed = Signal()
@@ -25,6 +27,11 @@ class ConditionGroupWidget(QWidget):
 
         if not self.is_root:
             group_box = QGroupBox()
+            # Set a border for non-root groups to make them visually distinct
+            group_box.setStyleSheet("QGroupBox { border: 1px solid gray; margin-top: 0.5em; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px 0 3px; }")
+            group_box.setTitle("子条件组")
+
+
             self.layout = QVBoxLayout(group_box)
             main_layout.addWidget(group_box)
         else:
@@ -65,38 +72,47 @@ class ConditionGroupWidget(QWidget):
 
 
     def set_available_search_fields(self, fields: list[tuple[str, str]]):
-        """
-        设置此条件组及其子组中所有关键词行可选的搜索字段。
-        fields: 一个元组列表，每个元组是 (database_column_name, display_name_for_combobox)
-        """
-        self._available_search_fields = fields
-        # 更新现有关键词行的字段选择器
-        for kw_data in self.keywords:
-            field_combo = kw_data.get("field_combo")
-            if field_combo:
-                current_field_db_name = field_combo.currentData() # 保存当前选中的db列名
-                field_combo.blockSignals(True)
-                field_combo.clear()
-                for db_col, display_name in self._available_search_fields:
-                    field_combo.addItem(display_name, db_col)
-                
-                # 尝试恢复之前的选择
-                idx_to_select = -1
-                if current_field_db_name:
-                    for i in range(field_combo.count()):
-                        if field_combo.itemData(i) == current_field_db_name:
-                            idx_to_select = i
-                            break
-                if idx_to_select != -1:
-                    field_combo.setCurrentIndex(idx_to_select)
-                elif field_combo.count() > 0 : # 默认选第一个
-                    field_combo.setCurrentIndex(0)
-                field_combo.blockSignals(False)
-        
-        # 递归更新子组
-        for child_group in self.child_groups:
-            child_group.set_available_search_fields(fields)
-        self._emit_condition_changed() # 字段列表变化也算条件变化
+            self._available_search_fields = fields
+            for kw_data in self.keywords: # 确保迭代所有已存在的关键词行
+                field_combo = kw_data.get("field_combo")
+                if field_combo:
+                    current_field_db_name = field_combo.currentData()
+                    
+                    field_combo.blockSignals(True)
+                    field_combo.clear()
+                    
+                    if self._available_search_fields: # 如果有可用字段
+                        field_combo.setEnabled(True) # <--- 确保启用
+                        for db_col, display_name in self._available_search_fields:
+                            field_combo.addItem(display_name, db_col)
+                        
+                        idx_to_select = -1
+                        if current_field_db_name:
+                            for i in range(field_combo.count()):
+                                if field_combo.itemData(i) == current_field_db_name:
+                                    idx_to_select = i
+                                    break
+                        if idx_to_select != -1:
+                            field_combo.setCurrentIndex(idx_to_select)
+                        elif field_combo.count() > 0:
+                            field_combo.setCurrentIndex(0)
+                    else: # 如果没有可用字段
+                        field_combo.addItem("无可用字段", None)
+                        field_combo.setEnabled(False) # <--- 确保禁用
+                    
+                    field_combo.blockSignals(False)
+                    # 手动触发一次信号，确保依赖它的逻辑（如按钮状态更新）被调用
+                    # 特别是对于第一个关键词行，它的初始状态可能依赖这个
+                    if field_combo.count() > 0:
+                        field_combo.currentTextChanged.emit(field_combo.currentText())
+
+
+            for child_group in self.child_groups:
+                child_group.set_available_search_fields(fields)
+            
+            # 即使没有关键词行，字段列表变化也应触发 condition_changed
+            # 以便主面板可以更新按钮状态等
+            self._emit_condition_changed()
 
 
     def add_keyword(self, field_db_name=None, keyword_type="包含", keyword_text=""): # 新增 field_db_name 参数
@@ -157,41 +173,31 @@ class ConditionGroupWidget(QWidget):
         self._emit_condition_changed()
         return keyword_data
 
-    # remove_keyword, delete_self, _emit_condition_changed 保持不变
     def remove_keyword(self, keyword_data: dict):
-        """
-        Removes a keyword row from the UI and internal list.
-        keyword_data: The dictionaryแสงข้อมูลของคำสำคัญที่จะถูกลบ
-        """
         if keyword_data in self.keywords:
-            # 从布局中移除 widget
             if keyword_data["widget"] is not None:
-                # 如果 items_layout 仍然有效且 widget 在其中
-                if self.items_layout and keyword_data["widget"].parentWidget() is not None:
-                     # self.items_layout.removeWidget(keyword_data["widget"]) # 这只是从布局中移除，不删除
-                    pass # deleteLater 会处理好从父布局移除
-                keyword_data["widget"].deleteLater() # 安全地删除 widget
-            
+                keyword_data["widget"].deleteLater()
             self.keywords.remove(keyword_data)
             self._emit_condition_changed()
     
-    def set_search_field(self, field_name):
-        self._block_signals = True
-        self.search_field = field_name
-        for group in self.child_groups:
-            group.set_search_field(field_name)
-        self._block_signals = False
-        self._emit_condition_changed()
+    # This method is not used by the current ConditionGroupWidget logic
+    # as search_field is now per-keyword. Keeping it commented for now.
+    # def set_search_field(self, field_name):
+    #     self._block_signals = True
+    #     # self.search_field = field_name # Not used
+    #     for group in self.child_groups:
+    #         group.set_search_field(field_name) # This would also be problematic
+    #     self._block_signals = False
+    #     self._emit_condition_changed()
 
     def add_group(self, group_data=None): # group_data 是用于加载状态的
-        # 子组将继承父组的 _available_search_fields (通过 set_available_search_fields 传递)
         group = ConditionGroupWidget(is_root=False, parent=self)
-        group.set_available_search_fields(self._available_search_fields) # 传递可用字段
+        group.set_available_search_fields(self._available_search_fields)
         group.condition_changed.connect(self._emit_condition_changed)
         self.child_groups.append(group)
         self.items_layout.addWidget(group)
         if group_data:
-            group.set_state(group_data) # 假设有 set_state 方法
+            group.set_state(group_data) 
         self._emit_condition_changed()
         return group
 
@@ -202,6 +208,8 @@ class ConditionGroupWidget(QWidget):
 
     def delete_self(self):
         parent_group = self.parent()
+        while parent_group is not None and not isinstance(parent_group, ConditionGroupWidget):
+            parent_group = parent_group.parent()
         if isinstance(parent_group, ConditionGroupWidget):
              parent_group.remove_child_group(self)
         self.deleteLater()
@@ -210,70 +218,146 @@ class ConditionGroupWidget(QWidget):
         if not self._block_signals:
              self.condition_changed.emit()
 
+    def _build_sql_string_fallback(self, sql_object) -> str:
+        """
+        Internal helper to convert psycopg2.sql objects to string without a db context.
+        This is a simplified version and might not handle all edge cases (e.g., complex Literals).
+        """
+        parts = []
+        def to_list_recursive(obj_to_convert, out_list):
+            if isinstance(obj_to_convert, pgsql.Composed):
+                for sub_item_in_composed in obj_to_convert:
+                    to_list_recursive(sub_item_in_composed, out_list)
+            elif isinstance(obj_to_convert, pgsql.SQL):
+                out_list.append(obj_to_convert.string)
+            elif isinstance(obj_to_convert, pgsql.Identifier):
+                temp_quoted_list_for_identifier = []
+                for s_part_from_identifier in obj_to_convert.strings:
+                    escaped_s_part = s_part_from_identifier.replace('"', '""')
+                    temp_quoted_list_for_identifier.append(f'"{escaped_s_part}"')
+                out_list.append(".".join(temp_quoted_list_for_identifier))
+            elif isinstance(obj_to_convert, pgsql.Literal):
+                try:
+                    out_list.append(str(obj_to_convert))
+                except Exception:
+                    out_list.append(f"'LITERAL_CONVERSION_ERROR:{obj_to_convert!r}'")
+            elif isinstance(obj_to_convert, str):
+                 out_list.append(obj_to_convert)
+            else: # Unknown type, use its string representation
+                out_list.append(str(obj_to_convert))
+        
+        to_list_recursive(sql_object, parts)
+        return "".join(parts)
+
+
     def get_condition(self):
         cond_parts = []
         params = []
-
+        
         for kw_data in self.keywords:
-            search_field_for_kw = kw_data["field_combo"].currentData() # 获取当前行选择的字段
+            search_field_for_kw = kw_data["field_combo"].currentData() 
             kw_text = kw_data["input"].text().strip()
-            kw_operator_text = kw_data["type_combo"].currentText() # "包含", "等于" 等
+            kw_operator_text = kw_data["type_combo"].currentText()
 
-            if search_field_for_kw and kw_text: # 必须选择了字段且输入了值
-                # 根据操作符构建SQL和参数
-                # 注意：search_field_for_kw 仍然直接嵌入，需要确保它是安全的列名
-                # 如果 search_field_for_kw 需要是标识符，外部传入时就应处理好
-                # 或者在这里使用 psycopg2.sql.Identifier(search_field_for_kw) 但会改变模板格式
+            if search_field_for_kw and kw_text: 
+                field_ident = pgsql.Identifier(search_field_for_kw)
                 
-                # 简单的类型判断（非常粗略，实际应用可能需要更精确的元数据）
-                is_numeric_field = "id" in search_field_for_kw.lower() or "count" in search_field_for_kw.lower() or "age" in search_field_for_kw.lower()
-                
-                # CAST to TEXT for ILIKE if field is not text type, to avoid errors
-                # This is a simplification. Ideally, know the column type.
-                field_expression = pgsql.Identifier(search_field_for_kw).as_string(None) # Get as "field_name"
-                
-                if kw_operator_text == "包含":
-                    cond_parts.append(f"CAST({field_expression} AS TEXT) ILIKE %s")
-                    params.append(f"%{kw_text}%")
-                elif kw_operator_text == "排除":
-                    cond_parts.append(f"CAST({field_expression} AS TEXT) NOT ILIKE %s")
-                    params.append(f"%{kw_text}%")
-                elif kw_operator_text == "等于":
-                    cond_parts.append(f"{field_expression} = %s")
-                    params.append(float(kw_text) if is_numeric_field and kw_text.replace('.','',1).isdigit() else kw_text)
-                elif kw_operator_text == "不等于":
-                    cond_parts.append(f"{field_expression} != %s")
-                    params.append(float(kw_text) if is_numeric_field and kw_text.replace('.','',1).isdigit() else kw_text)
-                elif kw_operator_text == "大于":
-                    cond_parts.append(f"{field_expression} > %s")
-                    params.append(float(kw_text) if is_numeric_field and kw_text.replace('.','',1).isdigit() else kw_text)
-                elif kw_operator_text == "小于":
-                    cond_parts.append(f"{field_expression} < %s")
-                    params.append(float(kw_text) if is_numeric_field and kw_text.replace('.','',1).isdigit() else kw_text)
-                elif kw_operator_text == "大于等于":
-                    cond_parts.append(f"{field_expression} >= %s")
-                    params.append(float(kw_text) if is_numeric_field and kw_text.replace('.','',1).isdigit() else kw_text)
-                elif kw_operator_text == "小于等于":
-                    cond_parts.append(f"{field_expression} <= %s")
-                    params.append(float(kw_text) if is_numeric_field and kw_text.replace('.','',1).isdigit() else kw_text)
-                # 可以添加对日期、布尔值等的处理
+                is_numeric_target_col = "id" in search_field_for_kw.lower() or \
+                                        "version" in search_field_for_kw.lower() or \
+                                        "count" in search_field_for_kw.lower() or \
+                                        "age" in search_field_for_kw.lower() or \
+                                        "num" in search_field_for_kw.lower()
+
+                sql_part = None
+                param_val = None
+
+                try:
+                    if kw_operator_text == "包含":
+                        sql_part = pgsql.SQL("CAST({fld} AS TEXT) ILIKE %s").format(fld=field_ident)
+                        param_val = f"%{kw_text}%"
+                    elif kw_operator_text == "排除":
+                        sql_part = pgsql.SQL("CAST({fld} AS TEXT) NOT ILIKE %s").format(fld=field_ident)
+                        param_val = f"%{kw_text}%"
+                    elif kw_operator_text in ["等于", "不等于", "大于", "小于", "大于等于", "小于等于"]:
+                        op_map = {"等于": "=", "不等于": "!=", "大于": ">", "小于": "<", "大于等于": ">=", "小于等于": "<="}
+                        sql_op_py_str = op_map[kw_operator_text] # Python string like "="
+                        
+                        can_be_numeric_val = False
+                        try:
+                            float_val_from_text = float(kw_text)
+                            can_be_numeric_val = True
+                        except ValueError:
+                            pass
+
+                        if is_numeric_target_col and can_be_numeric_val:
+                            param_val = float_val_from_text
+                            # Use named placeholders for clarity
+                            sql_part = pgsql.SQL("{identifier} {operator} %s").format(
+                                identifier=field_ident, 
+                                operator=pgsql.SQL(sql_op_py_str)
+                            )
+                        else: 
+                            param_val = kw_text
+                            sql_part = pgsql.SQL("CAST({identifier} AS TEXT) {operator} %s").format(
+                                identifier=field_ident,
+                                operator=pgsql.SQL(sql_op_py_str)
+                            )
+                    
+                    if sql_part and param_val is not None:
+                        cond_parts.append(sql_part)
+                        params.append(param_val)
+                except Exception as e:
+                    print(f"Error processing keyword condition ({search_field_for_kw} {kw_operator_text} {kw_text}): {e}")
+                    continue 
 
         for group in self.child_groups:
             group_sql_template, group_params = group.get_condition()
             if group_sql_template:
-                cond_parts.append(f"({group_sql_template})")
+                cond_parts.append(pgsql.SQL("({})").format(pgsql.SQL(group_sql_template)))
                 params.extend(group_params)
 
         if not cond_parts:
             return "", []
 
-        logic_operator = f" {self.logic_combo.currentText()} " # " AND " or " OR "
-        full_sql_template = logic_operator.join(cond_parts)
+        logic_operator_sql = pgsql.SQL(f" {self.logic_combo.currentText()} ")
+        
+        full_sql_composed = None
+        if len(cond_parts) == 1:
+            full_sql_composed = cond_parts[0]
+        else:
+            composed_parts_with_ops = []
+            for i, part in enumerate(cond_parts):
+                composed_parts_with_ops.append(part)
+                if i < len(cond_parts) - 1:
+                    composed_parts_with_ops.append(logic_operator_sql)
+            full_sql_composed = pgsql.Composed(composed_parts_with_ops)
+        
+        dummy_conn = None
+        try:
+            dsn_ = ""
+            try:
+                dsn_ = psycopg2.connect("").dsn
+                parsed_dsn = psycopg2.extensions.parse_dsn(dsn_)
+                user = parsed_dsn.get('user')
+                dbname = parsed_dsn.get('dbname','postgres') 
+                dummy_conn_string = f"dbname='{dbname}' user='{user if user else ''}'" 
+            except Exception: 
+                dummy_conn_string = "dbname='postgres'" 
 
-        return full_sql_template, params
-
-
-    def has_valid_input(self): # 需要更新，检查每个关键词行是否选择了字段
+            dummy_conn = psycopg2.connect(dummy_conn_string)
+            return full_sql_composed.as_string(dummy_conn), params
+        except psycopg2.Error:
+            try:
+                sql_string = self._build_sql_string_fallback(full_sql_composed)
+                return sql_string, params
+            except Exception as e_fallback:
+                print(f"Error in fallback SQL generation: {e_fallback}")
+                return f"-- Fallback SQL Generation Error: {e_fallback} --", params
+        finally:
+            if dummy_conn:
+                dummy_conn.close()
+                
+    def has_valid_input(self): 
         for kw_data in self.keywords:
             if kw_data["field_combo"].currentData() and kw_data["input"].text().strip():
                 return True
@@ -285,13 +369,12 @@ class ConditionGroupWidget(QWidget):
     def get_state(self) -> dict:
         state = {
             "logic": self.logic_combo.currentText(),
-            # "search_field" is no longer a group-level property for keywords
             "keywords": [],
             "child_groups": []
         }
         for kw_data in self.keywords:
             state["keywords"].append({
-                "field_db_name": kw_data["field_combo"].currentData(), # 保存选中字段的数据库名
+                "field_db_name": kw_data["field_combo"].currentData(), 
                 "type": kw_data["type_combo"].currentText(),
                 "text": kw_data["input"].text()
             })
@@ -301,14 +384,12 @@ class ConditionGroupWidget(QWidget):
 
     def set_state(self, state: dict, available_fields_for_state: list[tuple[str,str]] = None):
         self._block_signals = True
-        # 如果外部传入了可用字段列表（例如，在加载整个配置时），则优先使用它
         if available_fields_for_state is not None:
             self.set_available_search_fields(available_fields_for_state)
         
         try:
             self.logic_combo.setCurrentText(state.get("logic", "AND"))
 
-            # 清理现有UI元素
             for kw_data in reversed(self.keywords): self.remove_keyword(kw_data)
             for child_group in reversed(self.child_groups): child_group.delete_self()
             self.keywords.clear(); self.child_groups.clear()
@@ -321,8 +402,8 @@ class ConditionGroupWidget(QWidget):
                 )
             
             for child_group_state in state.get("child_groups", []):
-                new_child = self.add_group() # add_group 会自动传递 _available_search_fields
-                new_child.set_state(child_group_state) # 递归设置子组状态 (这里子组也会用父组刚设置的fields)
+                new_child = self.add_group() 
+                new_child.set_state(child_group_state) 
 
         except Exception as e:
             print(f"Error setting ConditionGroupWidget state: {e}")

@@ -2,6 +2,7 @@
 from PySide6.QtWidgets import QWidget, QMessageBox
 from PySide6.QtCore import Signal
 import psycopg2
+from PySide6.QtCore import Qt, Slot
 
 class BaseSourceConfigPanel(QWidget):
     config_changed_signal = Signal() # 当面板内部配置变化，可能影响主Tab按钮状态时发出

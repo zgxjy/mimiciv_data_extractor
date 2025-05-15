@@ -2,7 +2,7 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QGridLayout,
                                QListWidget, QListWidgetItem, QAbstractItemView,
                                QApplication, QGroupBox, QLabel, QMessageBox, 
-                               QComboBox, QScrollArea)
+                               QComboBox, QScrollArea,QFrame)
 from PySide6.QtCore import Qt, Slot
 
 from .base_panel import BaseSourceConfigPanel
@@ -18,62 +18,89 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
     def init_panel_ui(self):
         panel_layout = QVBoxLayout(self)
         panel_layout.setContentsMargins(0,0,0,0)
+        panel_layout.setSpacing(10) # 给面板内的主组之间增加一点间距
 
-        filter_group = QGroupBox("筛选监测指标 (来自 mimc_hosp.d_items)")
+        # --- “筛选...” GroupBox ---
+        # 根据面板类型替换标题
+        filter_group = QGroupBox("筛选监测指标 (来自 mimiciv_hosp.d_items)") 
         filter_group_layout = QVBoxLayout(filter_group)
+        filter_group_layout.setSpacing(8) # 组内元素间距
 
+        # 1. 条件构建区 (ConditionGroupWidget in QScrollArea)
         self.condition_widget = ConditionGroupWidget(is_root=True)
+        self.condition_widget.condition_changed.connect(self.config_changed_signal.emit) 
+        
         cg_scroll_area_panel = QScrollArea()
         cg_scroll_area_panel.setWidgetResizable(True)
         cg_scroll_area_panel.setWidget(self.condition_widget)
-        cg_scroll_area_panel.setMinimumHeight(200)
-        filter_group_layout.addWidget(cg_scroll_area_panel)
+        # 设置一个合理的最小高度，让条件组初始时能显示几行
+        # 如果希望它尽可能扩展，可以减小这个值，依赖伸展因子
+        cg_scroll_area_panel.setMinimumHeight(200) 
+        # 为条件滚动区设置较大的伸展因子，使其优先获得垂直空间
+        filter_group_layout.addWidget(cg_scroll_area_panel, 2) # Stretch factor 2
         
-        self.filter_items_btn = QPushButton("筛选指标项目")
+        # 2. 执行筛选操作区 (按钮居中或居右)
+        filter_button_layout = QHBoxLayout()
+        filter_button_layout.addStretch(1) 
+        # 根据面板类型替换按钮文本
+        self.filter_items_btn = QPushButton("筛选指标项目") 
         self.filter_items_btn.clicked.connect(self._filter_items_action)
-        filter_action_layout = QHBoxLayout()
-        filter_action_layout.addStretch()
-        filter_action_layout.addWidget(self.filter_items_btn)
-        filter_group_layout.addLayout(filter_action_layout)
-        
+        filter_button_layout.addWidget(self.filter_items_btn)
+        filter_button_layout.addStretch(1) 
+        filter_group_layout.addLayout(filter_button_layout)
+
+        # 可选的分隔线
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        filter_group_layout.addWidget(separator)
+
+        # 3. 筛选结果显示区 (QListWidget 和 QLabel)
         self.item_list = QListWidget()
         self.item_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.item_list.itemSelectionChanged.connect(self._on_item_selection_changed)
-        filter_group_layout.addWidget(self.item_list)
+        # 给列表一个合理的最小高度，但也允许它扩展
+        self.item_list.setMinimumHeight(120) 
+        # 为列表设置伸展因子，但小于条件滚动区
+        filter_group_layout.addWidget(self.item_list, 1) # Stretch factor 1
 
         self.selected_items_label = QLabel("已选项目: 0")
+        self.selected_items_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         filter_group_layout.addWidget(self.selected_items_label)
+        
         panel_layout.addWidget(filter_group)
 
+        # --- “提取逻辑” GroupBox ---
+        # (这部分结构根据CharteventsPanel的具体需求来确定，以下是基于之前的代码)
         logic_group = QGroupBox("提取逻辑")
         logic_group_layout = QVBoxLayout(logic_group)
+        logic_group_layout.setSpacing(8)
 
         value_type_layout = QHBoxLayout()
         value_type_layout.addWidget(QLabel("提取值列:"))
         self.value_type_combo = QComboBox()
         self.value_type_combo.addItem("数值 (valuenum)", "valuenum")
         self.value_type_combo.addItem("文本 (value)", "value")
-        # _on_value_type_combo_changed 内部会 self.config_changed_signal.emit()
         self.value_type_combo.currentIndexChanged.connect(self._on_value_type_combo_changed) 
         value_type_layout.addWidget(self.value_type_combo)
         value_type_layout.addStretch()
         logic_group_layout.addLayout(value_type_layout)
 
         self.value_agg_widget = ValueAggregationWidget()
-        # ValueAggregationWidget.aggregation_changed 是无参数信号，可以直接连接或用lambda
         self.value_agg_widget.aggregation_changed.connect(self.config_changed_signal.emit)
         logic_group_layout.addWidget(self.value_agg_widget)
 
         self.time_window_widget = TimeWindowSelectorWidget(label_text="时间窗口:")
-        # TimeWindowSelectorWidget.time_window_changed 是带参数 Signal(str)
-        # 使用 lambda 忽略参数 text_param
         self.time_window_widget.time_window_changed.connect(lambda: self.config_changed_signal.emit())
         logic_group_layout.addWidget(self.time_window_widget)
         
         panel_layout.addWidget(logic_group)
+        
         self.setLayout(panel_layout)
 
-        self._on_value_type_combo_changed(self.value_type_combo.currentIndex())
+        # 初始化依赖于UI组件状态的方法调用
+        if hasattr(self, '_on_value_type_combo_changed'): # 仅当存在此方法时调用
+            self._on_value_type_combo_changed(self.value_type_combo.currentIndex())
 
 
     @Slot(int)
@@ -172,8 +199,15 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
              self._close_panel_db()
              self.config_changed_signal.emit()
             
-    def update_panel_action_buttons_state(self, general_config_ok: bool): 
-        can_filter = general_config_ok and self.condition_widget.has_valid_input()
+    def update_panel_action_buttons_state(self, general_config_ok: bool):
+        # general_config_ok: 表示主 Tab 的通用配置是否OK（数据库已连接，队列表已选择）
+        # has_valid_conditions_in_panel: 表示此面板内的 ConditionGroupWidget 是否有有效输入
+        has_valid_conditions_in_panel = self.condition_widget.has_valid_input()
+        
+        # 筛选按钮的可用性取决于通用配置OK 并且 面板内的条件组有有效输入
+        can_filter = general_config_ok and has_valid_conditions_in_panel
+        
+        print(f"DEBUG Panel {self.__class__.__name__}: general_ok={general_config_ok}, panel_conditions_ok={has_valid_conditions_in_panel}, can_filter={can_filter}")
         self.filter_items_btn.setEnabled(can_filter)
 
 # --- END OF MODIFIED source_panels/chartevents_panel.py ---
