@@ -3,22 +3,23 @@ import re
 from typing import Tuple
 
 def validate_column_name(name: str) -> Tuple[bool, str]:
-    """
-    Validates a potential database column name.
-    Checks for emptiness, allowed characters, SQL keywords, and length.
-    """
     if not name: 
         return False, "列名不能为空。"
 
-    # PostgreSQL 允许以下划线开头，但通常规范是以字母开头
-    # 这个正则表达式允许以字母或下划线开头，后面跟字母、数字或下划线
-    # 并且确保如果以下划线开头，其后至少有一个字母或数字（避免只有下划线）
-    if not (re.match(r'^[a-zA-Z][a-zA-Z0-9_]*$', name) or \
-            (re.match(r'^_[a-zA-Z0-9_]+$', name) and len(name) > 1)):
-        return False, "列名只能包含字母、数字和下划线，必须以字母开头，或以下划线开头且其后至少有一个字母或数字。"
+    # 规则: 必须以字母（a-z, A-Z）或下划线 (_) 开头。
+    # 后续字符可以是字母、数字（0-9）或下划线。
+    # 使用 re.fullmatch 来确保整个字符串都符合模式。
+    pattern = r'^[a-zA-Z_][a-zA-Z0-9_]*$'
+    if not re.fullmatch(pattern, name):
+        # 如果不匹配，提供一个通用的错误信息。
+        # 特殊情况如纯数字开头，或包含非法字符等都会被这个正则拒绝。
+        return False, "列名必须以字母或下划线开头，后续只能包含字母、数字或下划线。"
 
-    # 一个更全面的 PostgreSQL 关键字列表 (可能仍不完全，但比之前的好)
-    # 来源: PostgreSQL 文档 + 常见实践
+    # 单独处理不允许的情况：仅由单个下划线组成的列名
+    if name == "_":
+        return False, "列名不能仅仅是一个下划线。"
+    
+    # 检查是否是SQL关键字 (你的关键字列表非常全面，很好！)
     keywords = {
         "A", "ABORT", "ABS", "ABSOLUTE", "ACCESS", "ACTION", "ADA", "ADD", "ADMIN", "AFTER", "AGGREGATE", 
         "ALIAS", "ALL", "ALLOCATE", "ALSO", "ALTER", "ALWAYS", "ANALYSE", "ANALYZE", "AND", "ANY", "ARE", 
@@ -111,12 +112,11 @@ def validate_column_name(name: str) -> Tuple[bool, str]:
         "XMLPARSE", "XMLPI", "XMLQUERY", "XMLROOT", "XMLSERIALIZE", "XMLTABLE", "XMLTEXT", 
         "XMLVALIDATE",
         "YEAR", "YES", "ZONE"
-    }
+    } # 你的关键字列表已经很好了
     if name.upper() in keywords: 
         return False, f"列名 '{name}' 是 SQL 关键字。"
     
-    # PostgreSQL 默认的最大标识符长度是 NAMEDATALEN - 1，通常是 63 字节
-    if len(name.encode('utf-8')) > 63: # 检查字节长度以处理多字节字符
+    if len(name.encode('utf-8')) > 63:
         return False, f"列名 '{name}' 过长 (PostgreSQL 默认最多63字节)。" 
     
     return True, ""
