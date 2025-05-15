@@ -1,6 +1,6 @@
 # --- START OF FILE base_info_sql.py ---
 # --- START OF FILE base_info_sql.py ---
-
+# schema check：https://mit-lcp.github.io/mimic-schema-spy/columns.byTable.html
 from psycopg2 import sql
 import pandas as pd
 

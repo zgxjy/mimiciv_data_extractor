@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QHBoxLayout, QMessageBox
 from PySide6.QtCore import Signal
-
+from app_config import DEFAULT_DB_HOST, DEFAULT_DB_PORT, DEFAULT_DB_NAME, DEFAULT_DB_USER
 import psycopg2
 
 class ConnectionTab(QWidget):
@@ -8,6 +8,10 @@ class ConnectionTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.db_params = {}
+        self.db_host_input = QLineEdit(DEFAULT_DB_HOST)
+        self.db_port_input = QLineEdit(DEFAULT_DB_PORT)
+        self.db_name_input = QLineEdit(DEFAULT_DB_NAME)
+        self.db_user_input = QLineEdit(DEFAULT_DB_USER)
         self.connected = False
         self.init_ui()
     
@@ -15,20 +19,12 @@ class ConnectionTab(QWidget):
         layout = QVBoxLayout(self)
         form_layout = QFormLayout()
 
-        self.db_name_input = QLineEdit("mimiciv")
         form_layout.addRow("数据库名称:", self.db_name_input)
-
-        self.db_user_input = QLineEdit("postgres")
         form_layout.addRow("用户名:", self.db_user_input)
-
         self.db_password_input = QLineEdit()
         self.db_password_input.setEchoMode(QLineEdit.Password)
         form_layout.addRow("密码:", self.db_password_input)
-
-        self.db_host_input = QLineEdit("localhost")
         form_layout.addRow("主机:", self.db_host_input)
-
-        self.db_port_input = QLineEdit("5432")
         form_layout.addRow("端口:", self.db_port_input)
 
         layout.addLayout(form_layout)

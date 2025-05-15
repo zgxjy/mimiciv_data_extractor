@@ -11,7 +11,7 @@ from psycopg2 import sql as psql
 import re
 import time
 import traceback
-from conditiongroup import ConditionGroupWidget # ConditionGroupWidget 现在没有 search_field 初始化参数
+from ui_components.conditiongroup import ConditionGroupWidget # ConditionGroupWidget 现在没有 search_field 初始化参数
 
 # --- Constants for Cohort Types (Admission criteria) ---
 COHORT_TYPE_FIRST_EVENT_STR = "首次事件入院 (基于该事件的患者首次入院)"

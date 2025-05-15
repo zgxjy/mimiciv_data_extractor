@@ -8,10 +8,10 @@ import psycopg2
 import re
 import time
 import pandas as pd
-from base_info_sql import (add_demography, add_antecedent, add_vital_sign,
+from sql_logic.base_info_sql import (add_demography, add_antecedent, add_vital_sign,
                            add_blood_info, add_cardiovascular_lab, add_medicine,
                            add_surgeries, add_past_diagnostic,add_scores) # Updated imports
-
+from app_config import DEFAULT_PAST_DIAGNOSIS_CATEGORIES
 
 class SQLWorker(QObject):
     finished = Signal(list, list)
@@ -180,10 +180,7 @@ class BaseInfoDataExtractionTab(QWidget):
         self.worker = None
         self.worker_thread = None
         self.option_checkboxes = [] # List to hold checkboxes
-        self.DIAG_CATEGORY_KEYWORDS = [
-            "sleep apnea", "insomnia", "depressive", "anxiety", "anxiolytic",
-            "diabetes", "hypertension", "myocardial infarction", "stroke", "asthma", "copd"
-        ]
+        self.DIAG_CATEGORY_KEYWORDS = DEFAULT_PAST_DIAGNOSIS_CATEGORIES
         self.init_ui()
 
     def init_ui(self):

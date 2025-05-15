@@ -8,7 +8,7 @@ import psycopg2
 import psycopg2.sql as pgsql
 import traceback
 
-from conditiongroup import ConditionGroupWidget # 导入增强版的 ConditionGroupWidget
+from ui_components.conditiongroup import ConditionGroupWidget # 导入增强版的 ConditionGroupWidget
 
 class DataDictionaryTab(QWidget):
     DICT_D_ITEMS = "mimiciv_hosp.d_items"

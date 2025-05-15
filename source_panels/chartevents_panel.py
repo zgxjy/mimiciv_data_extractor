@@ -1,12 +1,15 @@
-# --- START OF PROPOSED MODIFICATIONS FOR source_panels/chartevents_panel.py ---
+# --- START OF MODIFIED source_panels/chartevents_panel.py ---
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QGridLayout,
                                QListWidget, QListWidgetItem, QAbstractItemView,
-                               QApplication, QGroupBox, QLabel, QMessageBox, QCheckBox,QComboBox,QScrollArea) # 新增 QComboBox
+                               QApplication, QGroupBox, QLabel, QMessageBox, 
+                               QComboBox, QScrollArea)
 from PySide6.QtCore import Qt, Slot
 
 from .base_panel import BaseSourceConfigPanel
-from conditiongroup import ConditionGroupWidget
-import psycopg2
+from ui_components.conditiongroup import ConditionGroupWidget
+from ui_components.value_aggregation_widget import ValueAggregationWidget
+from ui_components.time_window_selector_widget import TimeWindowSelectorWidget
+
 import psycopg2.sql as pgsql
 import traceback
 
@@ -16,22 +19,15 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
         panel_layout = QVBoxLayout(self)
         panel_layout.setContentsMargins(0,0,0,0)
 
-        # 1. 项目筛选部分
         filter_group = QGroupBox("筛选监测指标 (来自 mimc_hosp.d_items)")
         filter_group_layout = QVBoxLayout(filter_group)
 
-        # search_field_hint_label 和 condition_widget 由主面板创建和管理
-        self.condition_widget = ConditionGroupWidget(is_root=True) # search_field 会在 populate_panel_if_needed 中设置
-        filter_group_layout.addWidget(self.condition_widget)
-        # 将 ConditionGroupWidget 放入 QScrollArea
+        self.condition_widget = ConditionGroupWidget(is_root=True)
         cg_scroll_area_panel = QScrollArea()
         cg_scroll_area_panel.setWidgetResizable(True)
         cg_scroll_area_panel.setWidget(self.condition_widget)
-        # 通常面板内的 ConditionGroupWidget 不需要设置固定的最小/最大高度，
-        # 因为它会填充 QStackedWidget 中的可用空间，而 QStackedWidget 的大小由主Tab的布局决定。
-        # 如果需要，可以设置: 
         cg_scroll_area_panel.setMinimumHeight(200)
-        filter_group_layout.addWidget(cg_scroll_area_panel) # 添加滚动区域 
+        filter_group_layout.addWidget(cg_scroll_area_panel)
         
         self.filter_items_btn = QPushButton("筛选指标项目")
         self.filter_items_btn.clicked.connect(self._filter_items_action)
@@ -47,24 +43,44 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
 
         self.selected_items_label = QLabel("已选项目: 0")
         filter_group_layout.addWidget(self.selected_items_label)
-        
         panel_layout.addWidget(filter_group)
 
-        # 新增：选择提取值类型的 QComboBox
+        logic_group = QGroupBox("提取逻辑")
+        logic_group_layout = QVBoxLayout(logic_group)
+
         value_type_layout = QHBoxLayout()
         value_type_layout.addWidget(QLabel("提取值列:"))
         self.value_type_combo = QComboBox()
         self.value_type_combo.addItem("数值 (valuenum)", "valuenum")
         self.value_type_combo.addItem("文本 (value)", "value")
-        self.value_type_combo.currentIndexChanged.connect(lambda: self.config_changed_signal.emit())
+        # _on_value_type_combo_changed 内部会 self.config_changed_signal.emit()
+        self.value_type_combo.currentIndexChanged.connect(self._on_value_type_combo_changed) 
         value_type_layout.addWidget(self.value_type_combo)
         value_type_layout.addStretch()
-        panel_layout.addLayout(value_type_layout) # 将此布局添加到面板
+        logic_group_layout.addLayout(value_type_layout)
 
-        # 2. 提取逻辑部分 - 这个面板使用主Tab的通用提取逻辑UI
-        # get_aggregation_config_widget() 和 get_time_window_options() 会返回 None
+        self.value_agg_widget = ValueAggregationWidget()
+        # ValueAggregationWidget.aggregation_changed 是无参数信号，可以直接连接或用lambda
+        self.value_agg_widget.aggregation_changed.connect(self.config_changed_signal.emit)
+        logic_group_layout.addWidget(self.value_agg_widget)
 
+        self.time_window_widget = TimeWindowSelectorWidget(label_text="时间窗口:")
+        # TimeWindowSelectorWidget.time_window_changed 是带参数 Signal(str)
+        # 使用 lambda 忽略参数 text_param
+        self.time_window_widget.time_window_changed.connect(lambda: self.config_changed_signal.emit())
+        logic_group_layout.addWidget(self.time_window_widget)
+        
+        panel_layout.addWidget(logic_group)
         self.setLayout(panel_layout)
+
+        self._on_value_type_combo_changed(self.value_type_combo.currentIndex())
+
+
+    @Slot(int)
+    def _on_value_type_combo_changed(self, index):
+        is_text_mode = (self.value_type_combo.itemData(index) == "value")
+        self.value_agg_widget.set_text_mode(is_text_mode)
+        self.config_changed_signal.emit() 
 
     def populate_panel_if_needed(self):
         available_fields = [
@@ -78,8 +94,11 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
              first_kw_field_combo = self.condition_widget.keywords[0].get("field_combo")
              if first_kw_field_combo and first_kw_field_combo.count() > 0:
                  first_kw_field_combo.setCurrentIndex(0)
-        # 可以在这里根据选中的 itemid 的 param_type 动态设置 value_type_combo 的默认值
-        # 但为了简单起见，先让用户手动选择
+        
+        value_agg_time_window_options = [
+            "ICU入住后24小时", "ICU入住后48小时", "整个ICU期间", "整个住院期间"
+        ]
+        self.time_window_widget.set_options(value_agg_time_window_options)
 
     def get_friendly_source_name(self) -> str:
         return "监测指标 (Chartevents - d_items)"
@@ -87,31 +106,37 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
     def get_item_filtering_details(self) -> tuple:
         return "mimiciv_hosp.d_items", "label", "itemid", "筛选字段: d_items.label", None
         
-    def get_value_column_for_aggregation(self) -> str | None:
-        # 现在由 value_type_combo 决定
-        if hasattr(self, 'value_type_combo'):
-            return self.value_type_combo.currentData()
-        return "valuenum" # 默认或回退
+    def get_panel_config(self) -> dict:
+        condition_sql, condition_params = self.condition_widget.get_condition()
+        return {
+            "source_event_table": "mimiciv_icu.chartevents",
+            "source_dict_table": "mimiciv_hosp.d_items",    
+            "item_id_column_in_event_table": "itemid",      
+            "item_filter_conditions": (condition_sql, condition_params), 
+            "selected_item_ids": self.get_selected_item_ids(),
+            "value_column_to_extract": self.value_type_combo.currentData(), 
+            "time_column_in_event_table": "charttime", 
+            "aggregation_methods": self.value_agg_widget.get_selected_methods(), 
+            "time_window_text": self.time_window_widget.get_current_time_window_text(), 
+        }
 
-    def get_time_column_for_windowing(self) -> str | None:
-        return "charttime"
-
-    def get_aggregation_config_widget(self) -> QWidget | None:
-        return None 
-    
-    def get_time_window_options(self) -> list | None:
-        return None 
+    def clear_panel_state(self): 
+        self.condition_widget.clear_all() 
+        self.item_list.clear()
+        self.selected_items_label.setText("已选项目: 0")
+        self.value_type_combo.setCurrentIndex(0) 
+        self.value_agg_widget.clear_selections()
+        self.time_window_widget.clear_selection()
+        self.config_changed_signal.emit()
         
+    # _on_item_selection_changed, _filter_items_action, update_panel_action_buttons_state 保持不变
     def _on_item_selection_changed(self):
         count = len(self.item_list.selectedItems())
         self.selected_items_label.setText(f"已选项目: {count}")
-        # 当选中项改变时，可以尝试根据选中项的 param_type 更新 value_type_combo 的默认值
-        # 例如，如果选中的都是数字型itemid，则默认选 valuenum
-        # 这里暂时不实现这个自动逻辑，让用户自己选 value_type_combo
         self.config_changed_signal.emit()
 
     @Slot()
-    def _filter_items_action(self): # (此方法逻辑不变，保持原样)
+    def _filter_items_action(self): 
          if not self._connect_panel_db():
              QMessageBox.warning(self, "数据库连接失败", "无法连接到数据库以筛选项目。")
              return
@@ -146,32 +171,9 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
              self.filter_items_btn.setEnabled(True)
              self._close_panel_db()
              self.config_changed_signal.emit()
-
-
-    def get_panel_config(self) -> dict:
-        condition_sql, condition_params = self.condition_widget.get_condition()
-        
-        value_col_to_extract = "valuenum" # 默认
-        if hasattr(self, 'value_type_combo'):
-            value_col_to_extract = self.value_type_combo.currentData()
-
-        return {
-            "source_event_table": "mimiciv_icu.chartevents",
-            "source_dict_table": "mimiciv_hosp.d_items",    
-            "item_id_column_in_event_table": "itemid",      
-            "item_filter_conditions": (condition_sql, condition_params), 
-            "selected_item_ids": self.get_selected_item_ids(),
-            "value_column_to_extract": value_col_to_extract, # 新增：指明提取 valuenum 还是 value
-        }
-
-    def clear_panel_state(self): # (与之前版本相同)
-        self.condition_widget.clear_all() 
-        self.item_list.clear()
-        self.selected_items_label.setText("已选项目: 0")
-        if hasattr(self, 'value_type_combo'): self.value_type_combo.setCurrentIndex(0) # 重置为valuenum
-        self.config_changed_signal.emit()
-        
-    def update_panel_action_buttons_state(self, general_config_ok: bool): # (与之前版本相同)
+            
+    def update_panel_action_buttons_state(self, general_config_ok: bool): 
         can_filter = general_config_ok and self.condition_widget.has_valid_input()
         self.filter_items_btn.setEnabled(can_filter)
-# --- END OF PROPOSED MODIFICATIONS FOR source_panels/chartevents_panel.py ---
+
+# --- END OF MODIFIED source_panels/chartevents_panel.py ---

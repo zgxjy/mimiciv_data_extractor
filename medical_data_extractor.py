@@ -5,13 +5,13 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QTabWidget, QMessageBox
 from PySide6.QtCore import Slot
 from PySide6.QtGui import QIcon
 
-from tab_connection import ConnectionTab
-from tab_structure import StructureTab
-from tab_query_cohort import QueryCohortTab
-from tab_combine_base_info import BaseInfoDataExtractionTab
-from tab_special_data_master import SpecialDataMasterTab # 导入新的主专项数据Tab
-from tab_data_dictionary import DataDictionaryTab     # <-- 新增导入
-from tab_data_export import DataExportTab
+from tabs.tab_connection import ConnectionTab
+from tabs.tab_structure import StructureTab
+from tabs.tab_query_cohort import QueryCohortTab
+from tabs.tab_combine_base_info import BaseInfoDataExtractionTab
+from tabs.tab_special_data_master import SpecialDataMasterTab # 导入新的主专项数据Tab
+from tabs.tab_data_dictionary import DataDictionaryTab     # <-- 新增导入
+from tabs.tab_data_export import DataExportTab
 
 
 class MedicalDataExtractor(QMainWindow):
@@ -21,7 +21,7 @@ class MedicalDataExtractor(QMainWindow):
         self.setGeometry(100, 100, 900, 850) # 原始大小，可能需要根据内容调整
 
         # icon.ico 与 medical_data_extractor.py 在同一目录
-        icon_path = "icon.ico" # 确保你有这个图标文件，或者注释掉这行
+        icon_path = "assets/icons/icon.ico" # 确保你有这个图标文件，或者注释掉这行
         self.setWindowIcon(QIcon(icon_path))
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
