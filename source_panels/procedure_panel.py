@@ -1,7 +1,7 @@
 # --- START OF FILE source_panels/procedure_panel.py ---
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QListWidget, QListWidgetItem, QAbstractItemView,
-                               QApplication, QGroupBox, QLabel, QMessageBox)
+                               QApplication, QGroupBox, QLabel, QMessageBox,QScrollArea)
 from PySide6.QtCore import Qt, Slot
 
 from .base_panel import BaseSourceConfigPanel
@@ -16,10 +16,20 @@ class ProcedureConfigPanel(BaseSourceConfigPanel):
 
         filter_group = QGroupBox("筛选操作/手术 (来自 mimc_hosp.d_icd_procedures)")
         filter_group_layout = QVBoxLayout(filter_group)
-
-        self.condition_widget = ConditionGroupWidget(is_root=True)
-        filter_group_layout.addWidget(self.condition_widget)
         
+        # search_field_hint_label 和 condition_widget 由主面板创建和管理
+        self.condition_widget = ConditionGroupWidget(is_root=True) # search_field 会在 populate_panel_if_needed 中设置
+        filter_group_layout.addWidget(self.condition_widget)
+        # 将 ConditionGroupWidget 放入 QScrollArea
+        cg_scroll_area_panel = QScrollArea()
+        cg_scroll_area_panel.setWidgetResizable(True)
+        cg_scroll_area_panel.setWidget(self.condition_widget)
+        # 通常面板内的 ConditionGroupWidget 不需要设置固定的最小/最大高度，
+        # 因为它会填充 QStackedWidget 中的可用空间，而 QStackedWidget 的大小由主Tab的布局决定。
+        # 如果需要，可以设置: 
+        cg_scroll_area_panel.setMinimumHeight(200)
+        filter_group_layout.addWidget(cg_scroll_area_panel) # 添加滚动区域
+
         self.filter_items_btn = QPushButton("筛选操作项目")
         self.filter_items_btn.clicked.connect(self._filter_items_action)
         filter_action_layout = QHBoxLayout()
@@ -39,15 +49,24 @@ class ProcedureConfigPanel(BaseSourceConfigPanel):
         self.setLayout(panel_layout)
 
     def populate_panel_if_needed(self):
-        dict_table, name_col, id_col, hint, _ = self.get_item_filtering_details()
-        self.condition_widget.set_search_field(name_col)
+        available_fields = [
+            ("long_title", "操作描述 (Long Title)"),
+            ("short_title", "操作缩写 (Short Title)"), 
+            ("icd_code", "操作代码 (ICD Code 精确)"),
+            ("icd_version", "ICD 版本 (精确)")
+        ]
+        self.condition_widget.set_available_search_fields(available_fields)
+        if self.condition_widget.keywords and available_fields:
+             first_kw_field_combo = self.condition_widget.keywords[0].get("field_combo")
+             if first_kw_field_combo and first_kw_field_combo.count() > 0:
+                 first_kw_field_combo.setCurrentIndex(0)
 
     def get_friendly_source_name(self) -> str:
         return "操作/手术 (Procedures - d_icd_procedures)"
 
     def get_item_filtering_details(self) -> tuple:
-        return "mimiciv_hosp.d_icd_procedures", "long_title", "icd_code", "筛选字段: long_title (mimiciv_hosp.d_icd_procedures)", None
-
+        return "mimiciv_hosp.d_icd_procedures", "long_title", "icd_code", "筛选字段: d_icd_procedures.long_title", None
+    
     def get_value_column_for_aggregation(self) -> str | None:
         return None # 操作/手术通常不聚合数值
 

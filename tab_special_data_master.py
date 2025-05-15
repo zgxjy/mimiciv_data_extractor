@@ -356,24 +356,19 @@ class SpecialDataMasterTab(QWidget):
 
         if active_panel:
             self.config_panel_stack.setCurrentWidget(active_panel)
-            active_panel.populate_panel_if_needed() # 让面板进行初始化（如设置search_field）
+            active_panel.populate_panel_if_needed() # 让面板进行初始化 (包括设置其ConditionGroupWidget的可用字段)
             
-            # 更新主Tab的 search_field_hint_label
-            _, _, _, hint, _ = active_panel.get_item_filtering_details()
-            self.search_field_hint_label.setText(hint if hint else "配置对应数据源的筛选条件。")
+            # 更新主Tab的 search_field_hint_label，从活动面板获取提示信息
+            # get_item_filtering_details 返回: (dict_table, name_col_in_dict, id_col_in_dict, friendly_hint, event_table_if_no_dict)
+            details = active_panel.get_item_filtering_details()
+            hint = details[3] if details and len(details) > 3 else "配置对应数据源的筛选条件。"
+            self.search_field_hint_label.setText(hint) # 更新提示
             
-            # 更新通用逻辑UI的可见性和内容
             self._update_common_logic_ui_visibility()
-            
-            # 更新默认列名和按钮状态
-            self._generate_and_set_default_col_name()
+            self._generate_and_set_default_col_name() # 这个方法会读取面板的选中项等，确保在面板populate后调用
             self.update_master_action_buttons_state()
         else:
-            # 如果没有对应的面板（例如，某个RadioButton还没有实现对应的Panel）
-            # 可以显示一个占位符Widget或者清空
-            # self.config_panel_stack.setCurrentIndex(-1) # 或者一个空白页
             self.search_field_hint_label.setText("请选择一个数据来源。")
-            print(f"警告: 没有为ID {current_id} 找到配置面板。")
 
     def _on_source_type_changed(self, button, checked):
         if checked:

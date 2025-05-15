@@ -1,7 +1,7 @@
 # --- START OF FILE source_panels/medication_panel.py ---
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QListWidget, QListWidgetItem, QAbstractItemView,
-                               QApplication, QGroupBox, QLabel, QMessageBox)
+                               QApplication, QGroupBox, QLabel, QMessageBox,QScrollArea)
 from PySide6.QtCore import Qt, Slot
 
 from .base_panel import BaseSourceConfigPanel
@@ -17,8 +17,18 @@ class MedicationConfigPanel(BaseSourceConfigPanel):
         filter_group = QGroupBox("筛选药物 (来自 mimiciv_hosp.prescriptions)")
         filter_group_layout = QVBoxLayout(filter_group)
         
-        self.condition_widget = ConditionGroupWidget(is_root=True)
+        # search_field_hint_label 和 condition_widget 由主面板创建和管理
+        self.condition_widget = ConditionGroupWidget(is_root=True) # search_field 会在 populate_panel_if_needed 中设置
         filter_group_layout.addWidget(self.condition_widget)
+        # 将 ConditionGroupWidget 放入 QScrollArea
+        cg_scroll_area_panel = QScrollArea()
+        cg_scroll_area_panel.setWidgetResizable(True)
+        cg_scroll_area_panel.setWidget(self.condition_widget)
+        # 通常面板内的 ConditionGroupWidget 不需要设置固定的最小/最大高度，
+        # 因为它会填充 QStackedWidget 中的可用空间，而 QStackedWidget 的大小由主Tab的布局决定。
+        # 如果需要，可以设置: 
+        cg_scroll_area_panel.setMinimumHeight(200)
+        filter_group_layout.addWidget(cg_scroll_area_panel) # 添加滚动区域    
         
         self.filter_items_btn = QPushButton("筛选药物项目")
         self.filter_items_btn.clicked.connect(self._filter_items_action)
@@ -39,16 +49,24 @@ class MedicationConfigPanel(BaseSourceConfigPanel):
         self.setLayout(panel_layout)
 
     def populate_panel_if_needed(self):
-        dict_table, name_col, id_col, hint, _ = self.get_item_filtering_details()
-        self.condition_widget.set_search_field(name_col)
+        # prescriptions 表直接筛选 drug 列
+        available_fields = [
+            ("drug", "药物名称 (Drug)") 
+        ]
+        # 注意：这里的 "drug" 是 prescriptions 表中的列名
+        self.condition_widget.set_available_search_fields(available_fields)
+        if self.condition_widget.keywords and available_fields:
+             first_kw_field_combo = self.condition_widget.keywords[0].get("field_combo")
+             if first_kw_field_combo and first_kw_field_combo.count() > 0:
+                 first_kw_field_combo.setCurrentIndex(0)
 
     def get_friendly_source_name(self) -> str:
         return "用药 (Prescriptions)"
 
     def get_item_filtering_details(self) -> tuple:
-        # prescriptions 没有独立的字典表，直接从事件表筛选 drug 字段
         # (dict_table=None, name_col_in_event, id_col_in_event, friendly_hint, event_table)
-        return None, "drug", "drug", "筛选字段: drug (mimiciv_hosp.prescriptions)", "mimiciv_hosp.prescriptions"
+        return None, "drug", "drug", "筛选字段: prescriptions.drug", "mimiciv_hosp.prescriptions"
+    
 
     def get_value_column_for_aggregation(self) -> str | None:
         return None # 用药通常不聚合数值

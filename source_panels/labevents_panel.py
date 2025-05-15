@@ -1,7 +1,7 @@
 # --- START OF FILE source_panels/labevents_panel.py ---
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QListWidget, QListWidgetItem, QAbstractItemView,
-                               QApplication, QGroupBox, QLabel, QMessageBox)
+                               QApplication, QGroupBox, QLabel, QMessageBox,QScrollArea)
 from PySide6.QtCore import Qt, Slot
 
 from .base_panel import BaseSourceConfigPanel
@@ -15,11 +15,24 @@ class LabeventsConfigPanel(BaseSourceConfigPanel):
         panel_layout.setContentsMargins(0,0,0,0)
 
         filter_group = QGroupBox("筛选化验项目 (来自 mimc_hosp.d_labitems)")
+        self.condition_widget = ConditionGroupWidget(is_root=True)
+
         filter_group_layout = QVBoxLayout(filter_group)
 
-        self.condition_widget = ConditionGroupWidget(is_root=True)
+
+        # search_field_hint_label 和 condition_widget 由主面板创建和管理
+        self.condition_widget = ConditionGroupWidget(is_root=True) # search_field 会在 populate_panel_if_needed 中设置
         filter_group_layout.addWidget(self.condition_widget)
-        
+        # 将 ConditionGroupWidget 放入 QScrollArea
+        cg_scroll_area_panel = QScrollArea()
+        cg_scroll_area_panel.setWidgetResizable(True)
+        cg_scroll_area_panel.setWidget(self.condition_widget)
+        # 通常面板内的 ConditionGroupWidget 不需要设置固定的最小/最大高度，
+        # 因为它会填充 QStackedWidget 中的可用空间，而 QStackedWidget 的大小由主Tab的布局决定。
+        # 如果需要，可以设置: 
+        cg_scroll_area_panel.setMinimumHeight(200)
+        filter_group_layout.addWidget(cg_scroll_area_panel) # 添加滚动区域    
+
         self.filter_items_btn = QPushButton("筛选化验项目")
         self.filter_items_btn.clicked.connect(self._filter_items_action)
         filter_action_layout = QHBoxLayout()
@@ -39,16 +52,24 @@ class LabeventsConfigPanel(BaseSourceConfigPanel):
         self.setLayout(panel_layout)
 
     def populate_panel_if_needed(self):
-        dict_table, name_col, id_col, hint, _ = self.get_item_filtering_details()
-        self.condition_widget.set_search_field(name_col)
-        # 主Tab的 search_field_hint_label 由主Tab的 _update_active_panel 更新
+        available_fields = [
+            ("label", "项目名 (Label)"),
+            ("category", "类别 (Category)"),
+            ("fluid", "体液类型 (Fluid)"),
+            ("itemid", "ItemID (精确)")
+        ]
+        self.condition_widget.set_available_search_fields(available_fields)
+        if self.condition_widget.keywords and available_fields:
+             first_kw_field_combo = self.condition_widget.keywords[0].get("field_combo")
+             if first_kw_field_combo and first_kw_field_combo.count() > 0:
+                 first_kw_field_combo.setCurrentIndex(0)
 
     def get_friendly_source_name(self) -> str:
         return "化验 (Labevents - d_labitems)"
 
     def get_item_filtering_details(self) -> tuple:
-        return "mimiciv_hosp.d_labitems", "label", "itemid", "筛选字段: label (mimiciv_hosp.d_labitems)", None
-        
+        return "mimiciv_hosp.d_labitems", "label", "itemid", "筛选字段: d_labitems.label", None
+      
     def get_value_column_for_aggregation(self) -> str | None:
         return "valuenum"
 

@@ -323,13 +323,13 @@ class QueryCohortTab(QWidget):
         instruction_label = QLabel("使用下方条件组构建筛选条件 (主要针对\"标题/描述\"列):")
         controls_and_preview_layout.addWidget(instruction_label)
         
-        self.condition_group = ConditionGroupWidget(is_root=True) # 移除 search_field
+        self.condition_group = ConditionGroupWidget(is_root=True) 
         self.condition_group.condition_changed.connect(self.update_button_states)
         
         cg_scroll_area = QScrollArea()
         cg_scroll_area.setWidgetResizable(True)
         cg_scroll_area.setWidget(self.condition_group)
-        cg_scroll_area.setMinimumHeight(150) # 根据需要调整
+        cg_scroll_area.setMinimumHeight(200) # 至少保证能看到几行
         controls_and_preview_layout.addWidget(cg_scroll_area)
 
         cohort_type_layout = QHBoxLayout()
