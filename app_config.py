@@ -10,7 +10,7 @@ DEFAULT_DB_HOST = "localhost"
 DEFAULT_DB_PORT = "5432"
 DEFAULT_DB_NAME = "mimiciv3"
 DEFAULT_DB_USER = "postgres"
-# DEFAULT_DB_PASSWORD = "" # 密码通常不硬编码，让用户输入
+DEFAULT_DB_PASSWORD = "940726" # 密码通常不硬编码，让用户输入
 
 # 默认导出路径 (可以是一个相对路径或特殊标记如 "USER_DOCUMENTS")
 # 在实际使用时，代码需要解析这个路径

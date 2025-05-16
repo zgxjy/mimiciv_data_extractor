@@ -228,7 +228,7 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
                     list_item.setData(Qt.ItemDataRole.UserRole, (str(item_id_val), display_name))
                     self.item_list.addItem(list_item)
             else:
-                 elf.item_list.addItem("未找到符合条件的项目")
+                self.item_list.addItem("未找到符合条件的项目")
         except Exception as e:
             self.item_list.clear(); self.item_list.addItem("查询项目出错!")
             QMessageBox.critical(self, "筛选项目失败", f"查询项目时出错: {str(e)}\n{traceback.format_exc()}")

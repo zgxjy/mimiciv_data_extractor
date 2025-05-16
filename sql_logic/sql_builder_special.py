@@ -151,6 +151,7 @@ def build_special_data_sql(
                 ("last", "(array_agg({val} ORDER BY {time} DESC NULLS LAST))[1]", pgsql.SQL("NUMERIC")),
                 ("min", "MIN({val})", pgsql.SQL("NUMERIC")), ("max", "MAX({val})", pgsql.SQL("NUMERIC")),
                 ("mean", "AVG({val})", pgsql.SQL("NUMERIC")), ("countval", "COUNT({val})", pgsql.SQL("INTEGER")),
+
             ]
         else: # 文本型
             method_configs = [

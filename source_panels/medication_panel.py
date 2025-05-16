@@ -118,16 +118,37 @@ class MedicationConfigPanel(BaseSourceConfigPanel):
 
     def get_panel_config(self) -> dict:
         condition_sql, condition_params = self.condition_widget.get_condition()
+        current_time_window = self.time_window_widget.get_current_time_window_text()
+        
+        # 默认的 JOIN 行为是基于 cohort.hadm_id = event.hadm_id
+        # {event_table} {evt_alias} JOIN {cohort_table} {coh_alias} ON {evt_alias}.hadm_id = {coh_alias}.hadm_id
+        # 对于 "住院以前"，我们需要覆盖这个JOIN
+        
+        join_override_sql = None
+        if current_time_window == "住院以前 (既往史)":
+            # 构建我们讨论过的三表JOIN SQL模板
+            # 使用 {event_table} 作为 prescriptions 表的占位符 (别名 {evt_alias})
+            # 使用 {cohort_table} 作为目标队列数据表的占位符 (别名 {coh_alias})
+            # 引入 admissions 表 (别名 {adm_evt})
+            join_override_sql = pgsql.SQL(
+                "FROM {event_table} {evt_alias} " # mimiciv_hosp.prescriptions p
+                "JOIN {cohort_table} {coh_alias} ON {evt_alias}.subject_id = {coh_alias}.subject_id " # Join cohort on subject_id
+                "JOIN mimiciv_hosp.admissions {adm_evt} ON {evt_alias}.hadm_id = {adm_evt}.hadm_id" # Join prescriptions to its admission details
+            )
+            # 注意：上面的 {evt_alias}.subject_id = {coh_alias}.subject_id AND {evt_alias}.hadm_id = {adm_evt}.hadm_id
+            # 确保了我们能通过 adm_evt.admittime < coh_alias.admittime 来比较
+
         return {
             "source_event_table": "mimiciv_hosp.prescriptions",
             "source_dict_table": None,
-            "item_id_column_in_event_table": "drug", 
-            "item_filter_conditions": (condition_sql, condition_params), 
+            "item_id_column_in_event_table": "drug",
+            "item_filter_conditions": (condition_sql, condition_params),
             "selected_item_ids": self.get_selected_item_ids(),
-            "value_column_to_extract": None, # 没有直接的值列用于通用聚合
-            "time_column_in_event_table": "starttime", # 用于时间窗口
+            "value_column_to_extract": None,
+            "time_column_in_event_table": "starttime", # Prescriptions has starttime
             "event_outputs": self.event_output_widget.get_selected_outputs(),
-            "time_window_text": self.time_window_widget.get_current_time_window_text(),
+            "time_window_text": current_time_window,
+            "cte_join_on_cohort_override": join_override_sql # <--- 把构建好的SQL对象传过去
         }
 
     def clear_panel_state(self):

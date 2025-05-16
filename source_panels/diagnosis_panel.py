@@ -120,17 +120,44 @@ class DiagnosisConfigPanel(BaseSourceConfigPanel):
     # def get_time_column_for_windowing(self) -> str | None: return None # 诊断事件没有自己的时间戳
 
     def get_panel_config(self) -> dict:
+        # ... (获取 condition_sql, condition_params, selected_item_ids) ...
         condition_sql, condition_params = self.condition_widget.get_condition()
+        selected_items = self.get_selected_item_ids()
+
+        current_time_window = self.time_window_widget.get_current_time_window_text()
+        
+        join_override_sql = None
+        # diagnoses_icd 表没有直接的事件时间戳。其时间上下文来自其关联的 admissions 表。
+        # 对于“当前住院/ICU”，JOIN on hadm_id 已经限定了。
+        # 对于“住院以前”，JOIN on subject_id + admissions.admittime < cohort.admittime 是核心。
+        event_time_column = None # diagnoses_icd 没有自己的 charttime 或类似列
+
+        if current_time_window == "住院以前 (既往史)":
+            join_override_sql = pgsql.SQL(
+                "FROM {event_table} {evt_alias} " # e.g., mimiciv_hosp.diagnoses_icd "evt"
+                "JOIN {cohort_table} {coh_alias} ON {evt_alias}.subject_id = {coh_alias}.subject_id "
+                "JOIN mimiciv_hosp.admissions {adm_evt} ON {evt_alias}.hadm_id = {adm_evt}.hadm_id"
+            )
+        
+        # 对于 "整个住院期间 (当前入院)" 或 "整个ICU期间 (当前入院)"
+        # diagnoses_icd 本身没有时间戳，它的时间上下文是其关联的 hadm_id。
+        # 默认的 JOIN (evt.hadm_id = cohort.hadm_id) 已经将诊断限定在了正确的入院事件。
+        # sql_builder_special.py 中针对非 is_value_source 且非 "住院以前" 的时间窗口逻辑
+        # 可能需要调整，因为它们期望一个 actual_event_time_col_ident。
+        # 或者，对于这类事件，这些时间窗口的意义不大，因为诊断通常是针对某次入院的，
+        # "住院以前" 才需要特殊处理时间比较。
+
         return {
             "source_event_table": "mimiciv_hosp.diagnoses_icd",
-            "source_dict_table": "mimiciv_hosp.d_icd_diagnoses",
+            # "source_dict_table": "mimiciv_hosp.d_icd_diagnoses",
             "item_id_column_in_event_table": "icd_code",
             "item_filter_conditions": (condition_sql, condition_params),
-            "selected_item_ids": self.get_selected_item_ids(),
+            "selected_item_ids": selected_items,
             "value_column_to_extract": None,
-            "time_column_in_event_table": None, # 诊断事件本身没有时间戳
+            "time_column_in_event_table": event_time_column, # 设为None，因为诊断表本身无时间
             "event_outputs": self.event_output_widget.get_selected_outputs(),
-            "time_window_text": self.time_window_widget.get_current_time_window_text(),
+            "time_window_text": current_time_window,
+            "cte_join_on_cohort_override": join_override_sql
         }
 
     def clear_panel_state(self):

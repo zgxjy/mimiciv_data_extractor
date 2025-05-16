@@ -120,17 +120,45 @@ class ProcedureConfigPanel(BaseSourceConfigPanel):
     # def get_time_column_for_windowing(self) -> str | None: return "chartdate" # procedures_icd 有 chartdate
 
     def get_panel_config(self) -> dict:
-        condition_sql, condition_params = self.condition_widget.get_condition()
+        # ... (获取 condition_sql, condition_params, selected_item_ids) ...
+        condition_sql, condition_params = self.condition_widget.get_condition() # 假设你这样获取
+        selected_items = self.get_selected_item_ids() # 假设你这样获取
+
+        current_time_window = self.time_window_widget.get_current_time_window_text()
+        
+        join_override_sql = None
+        event_time_column = "chartdate" # procedures_icd 有 chartdate
+
+        if current_time_window == "住院以前 (既往史)":
+            join_override_sql = pgsql.SQL(
+                "FROM {event_table} {evt_alias} " # e.g., mimiciv_hosp.procedures_icd "evt"
+                "JOIN {cohort_table} {coh_alias} ON {evt_alias}.subject_id = {coh_alias}.subject_id "
+                "JOIN mimiciv_hosp.admissions {adm_evt} ON {evt_alias}.hadm_id = {adm_evt}.hadm_id"
+            )
+            # 对于“住院以前”，我们比较的是adm_evt.admittime，所以 procedures_icd.chartdate 可能不是必需的
+            # 但 sql_builder_special.py 的时间窗口逻辑可能会尝试使用它，如果存在的话。
+            # 如果“住院以前”不需要 evt.chartdate 参与时间比较，可以考虑将 event_time_column 设为 None
+            # 但为了通用性，sql_builder_special.py 中的时间窗口判断可能需要更细致。
+            # 目前，只要JOIN正确，WHERE "adm_evt".admittime < cohort.admittime 就会起作用。
+
+        # elif current_time_window == "整个住院期间 (当前入院)":
+            # 默认的 JOIN (evt.hadm_id = cohort.hadm_id) 可能是可以的
+            # 时间条件会是 evt.chartdate BETWEEN cohort.admittime AND cohort.dischtime
+            # pass # 不需要 join_override_sql
+
+        # ... 其他时间窗口逻辑 (如果需要特殊的JOIN)
+
         return {
             "source_event_table": "mimiciv_hosp.procedures_icd",
-            "source_dict_table": "mimiciv_hosp.d_icd_procedures",
-            "item_id_column_in_event_table": "icd_code",
+            # "source_dict_table": "mimiciv_hosp.d_icd_procedures", # 用于UI筛选，builder不直接用
+            "item_id_column_in_event_table": "icd_code", # procedures_icd 使用 icd_code
             "item_filter_conditions": (condition_sql, condition_params),
-            "selected_item_ids": self.get_selected_item_ids(),
-            "value_column_to_extract": None,
-            "time_column_in_event_table": "chartdate", # procedures_icd 有 chartdate，但可能为空
+            "selected_item_ids": selected_items,
+            "value_column_to_extract": None, # Procedures 是事件型的
+            "time_column_in_event_table": event_time_column, # procedures_icd 有 chartdate
             "event_outputs": self.event_output_widget.get_selected_outputs(),
-            "time_window_text": self.time_window_widget.get_current_time_window_text(),
+            "time_window_text": current_time_window,
+            "cte_join_on_cohort_override": join_override_sql
         }
 
     def clear_panel_state(self):
