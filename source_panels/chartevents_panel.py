@@ -1,7 +1,7 @@
 # --- START OF MODIFIED source_panels/chartevents_panel.py ---
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QGridLayout,
                                QListWidget, QListWidgetItem, QAbstractItemView,
-                               QApplication, QGroupBox, QLabel, QMessageBox, 
+                               QApplication, QGroupBox, QLabel, QMessageBox, QTextEdit,
                                QComboBox, QScrollArea,QFrame)
 from PySide6.QtCore import Qt, Slot
 
@@ -21,7 +21,7 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
         panel_layout.setSpacing(10) # 给面板内的主组之间增加一点间距
 
         # --- “筛选...” GroupBox ---
-        filter_group = QGroupBox("筛选监测指标 (来自 mimiciv_hosp.d_items)")
+        filter_group = QGroupBox("筛选监测指标 (来自 mimiciv_icu.d_items)")
         filter_group_layout = QVBoxLayout(filter_group) # 主垂直布局
         filter_group_layout.setSpacing(8)
 
@@ -48,6 +48,21 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setFrameShadow(QFrame.Shadow.Sunken)
+        filter_group_layout.addWidget(separator)
+
+        # --- 新增：筛选SQL预览区 ---
+        self.filter_sql_preview_label = QLabel("最近筛选SQL预览:") # 可选的标签
+        filter_group_layout.addWidget(self.filter_sql_preview_label)
+        self.filter_sql_preview_textedit = QTextEdit()
+        self.filter_sql_preview_textedit.setReadOnly(True)
+        self.filter_sql_preview_textedit.setFixedHeight(60) # 设置一个合适的高度，例如3-4行
+        self.filter_sql_preview_textedit.setPlaceholderText("执行“筛选指标项目”后将在此显示SQL...")
+        filter_group_layout.addWidget(self.filter_sql_preview_textedit)
+        # --- 结束新增 ---
+
+        # 可选的分隔线，增加视觉分离
+        separator = QFrame()
+        # ... (separator setup) ...
         filter_group_layout.addWidget(separator)
 
         # 3. 筛选结果显示区 (QListWidget in QScrollArea, 和 QLabel)
@@ -108,12 +123,12 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
         self.config_changed_signal.emit() 
 
     def populate_panel_if_needed(self):
-        available_fields = [
+        available_fields = [ 
             ("label", "项目名 (Label)"), ("abbreviation", "缩写 (Abbreviation)"),
             ("category", "类别 (Category)"), ("param_type", "参数类型 (Param Type)"),
-            ("unitname", "单位 (Unit Name)"), ("linksto", "关联表 (Links To)"),
-            ("dbsource", "数据源 (DB Source)"), ("itemid", "ItemID (精确)") 
+            ("unitname", "单位 (Unit Name)"), ("linksto", "关联表 (Links To)"),("itemid", "ItemID (精确)") 
         ]
+        
         self.condition_widget.set_available_search_fields(available_fields)
         if self.condition_widget.keywords and available_fields:
              first_kw_field_combo = self.condition_widget.keywords[0].get("field_combo")
@@ -129,13 +144,13 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
         return "监测指标 (Chartevents - d_items)"
 
     def get_item_filtering_details(self) -> tuple:
-        return "mimiciv_hosp.d_items", "label", "itemid", "筛选字段: d_items.label", None
+        return "mimiciv_icu.d_items", "label", "itemid", "筛选字段: d_items.label", None
         
     def get_panel_config(self) -> dict:
         condition_sql, condition_params = self.condition_widget.get_condition()
         return {
             "source_event_table": "mimiciv_icu.chartevents",
-            "source_dict_table": "mimiciv_hosp.d_items",    
+            "source_dict_table": "mimiciv_icu.d_items",    
             "item_id_column_in_event_table": "itemid",      
             "item_filter_conditions": (condition_sql, condition_params), 
             "selected_item_ids": self.get_selected_item_ids(),
@@ -149,6 +164,7 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
         self.condition_widget.clear_all() 
         self.item_list.clear()
         self.selected_items_label.setText("已选项目: 0")
+        self.filter_sql_preview_textedit.clear()
         self.value_type_combo.setCurrentIndex(0) 
         self.value_agg_widget.clear_selections()
         self.time_window_widget.clear_selection()
@@ -162,40 +178,64 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
 
     @Slot()
     def _filter_items_action(self): 
-         if not self._connect_panel_db():
-             QMessageBox.warning(self, "数据库连接失败", "无法连接到数据库以筛选项目。")
-             return
-         dict_table, name_col, id_col, _, _ = self.get_item_filtering_details()
-         condition_sql_template, condition_params = self.condition_widget.get_condition()
-         self.item_list.clear(); self.item_list.addItem("正在查询...")
-         self.filter_items_btn.setEnabled(False); QApplication.processEvents()
-         if not condition_sql_template:
-             self.item_list.clear(); self.item_list.addItem("请输入筛选条件。")
-             self.filter_items_btn.setEnabled(True); self._close_panel_db(); return
-         try:
-             query_template_obj = pgsql.SQL("SELECT {id_col_ident}, {name_col_ident} FROM {dict_table_ident} WHERE {condition} ORDER BY {name_col_ident} LIMIT 500") \
+        if not self._connect_panel_db():
+            QMessageBox.warning(self, "数据库连接失败", "无法连接到数据库以筛选项目。")
+            return
+        dict_table, name_col, id_col, _, _ = self.get_item_filtering_details()
+        condition_sql_template, condition_params = self.condition_widget.get_condition()
+        self.item_list.clear(); self.item_list.addItem("正在查询...")
+        self.filter_items_btn.setEnabled(False); QApplication.processEvents()
+        if not condition_sql_template:
+            self.item_list.clear(); self.item_list.addItem("请输入筛选条件。")
+            self.filter_items_btn.setEnabled(True); self._close_panel_db(); return
+        try:
+            query_template_obj = pgsql.SQL("SELECT {id_col_ident}, {name_col_ident} FROM {dict_table_ident} WHERE {condition} ORDER BY {name_col_ident} LIMIT 500") \
                                  .format(id_col_ident=pgsql.Identifier(id_col),
                                          name_col_ident=pgsql.Identifier(name_col),
                                          dict_table_ident=pgsql.SQL(dict_table),
                                          condition=pgsql.SQL(condition_sql_template))
-             self._db_cursor.execute(query_template_obj, condition_params)
-             items = self._db_cursor.fetchall()
-             self.item_list.clear()
-             if items:
-                 for item_id_val, item_name_disp_val in items:
-                     display_name = str(item_name_disp_val) if item_name_disp_val is not None else f"ID_{item_id_val}"
-                     list_item = QListWidgetItem(f"{display_name} (ID: {item_id_val})")
-                     list_item.setData(Qt.ItemDataRole.UserRole, (str(item_id_val), display_name))
-                     self.item_list.addItem(list_item)
-             else:
-                 self.item_list.addItem("未找到符合条件的项目")
-         except Exception as e:
-             self.item_list.clear(); self.item_list.addItem("查询项目出错!")
-             QMessageBox.critical(self, "筛选项目失败", f"查询项目时出错: {str(e)}\n{traceback.format_exc()}")
-         finally:
-             self.filter_items_btn.setEnabled(True)
-             self._close_panel_db()
-             self.config_changed_signal.emit()
+            # --- 更新SQL预览文本框 ---
+            try:
+                # 尝试使用数据库连接来“美化”SQL（如果参数是元组，会替换 %s）
+                # 注意：mogrify 用于调试，它会处理参数替换，但可能不完全等同于服务器执行时的绑定
+                if self._db_conn and not self._db_conn.closed:
+                    # Mogrify expects a query string, not a Composed object directly for params
+                    # We need to get the string version of query_template_obj first
+                    base_sql_str = query_template_obj.as_string(self._db_conn)
+                    if condition_params: # mogrify needs params as a tuple or dict
+                        mogrified_sql = self._db_conn.cursor().mogrify(base_sql_str, condition_params).decode(self._db_conn.encoding or 'utf-8')
+                    else:
+                        mogrified_sql = base_sql_str
+                    self.filter_sql_preview_textedit.setText(mogrified_sql)
+                else: # 如果没有连接，就显示模板和参数
+                    self.filter_sql_preview_textedit.setText(
+                        f"-- SQL Template --\n{str(query_template_obj)}\n-- Params --\n{condition_params}"
+                    )
+            except Exception as e_preview:
+                # 如果生成预览失败，显示原始模板和参数
+                self.filter_sql_preview_textedit.setText(
+                    f"-- Error generating SQL preview: {e_preview}\n"
+                    f"-- SQL Template --\n{str(query_template_obj)}\n-- Params --\n{condition_params}"
+                )
+            # --- 结束更新 ---
+            self._db_cursor.execute(query_template_obj, condition_params)
+            items = self._db_cursor.fetchall()
+            self.item_list.clear()
+            if items:
+                for item_id_val, item_name_disp_val in items:
+                    display_name = str(item_name_disp_val) if item_name_disp_val is not None else f"ID_{item_id_val}"
+                    list_item = QListWidgetItem(f"{display_name} (ID: {item_id_val})")
+                    list_item.setData(Qt.ItemDataRole.UserRole, (str(item_id_val), display_name))
+                    self.item_list.addItem(list_item)
+            else:
+                 elf.item_list.addItem("未找到符合条件的项目")
+        except Exception as e:
+            self.item_list.clear(); self.item_list.addItem("查询项目出错!")
+            QMessageBox.critical(self, "筛选项目失败", f"查询项目时出错: {str(e)}\n{traceback.format_exc()}")
+        finally:
+            self.filter_items_btn.setEnabled(True)
+            self._close_panel_db()
+            self.config_changed_signal.emit()
             
     def update_panel_action_buttons_state(self, general_config_ok: bool):
         # general_config_ok: 表示主 Tab 的通用配置是否OK（数据库已连接，队列表已选择）

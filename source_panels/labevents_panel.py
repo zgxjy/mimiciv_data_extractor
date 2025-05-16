@@ -1,6 +1,6 @@
 # --- START OF FILE source_panels/labevents_panel.py ---
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-                               QListWidget, QListWidgetItem, QAbstractItemView,
+                               QListWidget, QListWidgetItem, QAbstractItemView,QTextEdit,
                                QApplication, QGroupBox, QLabel, QMessageBox, QScrollArea,QFrame)
 from PySide6.QtCore import Qt, Slot
 
@@ -47,6 +47,22 @@ class LabeventsConfigPanel(BaseSourceConfigPanel):
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setFrameShadow(QFrame.Shadow.Sunken)
         filter_group_layout.addWidget(separator)
+
+        # --- 新增：筛选SQL预览区 ---
+        self.filter_sql_preview_label = QLabel("最近筛选SQL预览:") # 可选的标签
+        filter_group_layout.addWidget(self.filter_sql_preview_label)
+        self.filter_sql_preview_textedit = QTextEdit()
+        self.filter_sql_preview_textedit.setReadOnly(True)
+        self.filter_sql_preview_textedit.setFixedHeight(60) # 设置一个合适的高度，例如3-4行
+        self.filter_sql_preview_textedit.setPlaceholderText("执行“筛选指标项目”后将在此显示SQL...")
+        filter_group_layout.addWidget(self.filter_sql_preview_textedit)
+        # --- 结束新增 ---
+
+        # 可选的分隔线，增加视觉分离
+        separator = QFrame()
+        # ... (separator setup) ...
+        filter_group_layout.addWidget(separator)
+        
 
         # 3. 筛选结果显示区 (QListWidget in QScrollArea, 和 QLabel)
         self.item_list = QListWidget()
@@ -130,6 +146,7 @@ class LabeventsConfigPanel(BaseSourceConfigPanel):
         self.condition_widget.clear_all()
         self.item_list.clear()
         self.selected_items_label.setText("已选项目: 0")
+        self.filter_sql_preview_textedit.clear()
         self.value_agg_widget.clear_selections()
         self.value_agg_widget.set_text_mode(False) 
         self.time_window_widget.clear_selection() # 或者 set_options([])
@@ -159,6 +176,32 @@ class LabeventsConfigPanel(BaseSourceConfigPanel):
                                         name_col_ident=pgsql.Identifier(name_col),
                                         dict_table_ident=pgsql.SQL(dict_table),
                                         condition=pgsql.SQL(condition_sql_template))
+
+            # --- 更新SQL预览文本框 ---
+            try:
+                # 尝试使用数据库连接来“美化”SQL（如果参数是元组，会替换 %s）
+                # 注意：mogrify 用于调试，它会处理参数替换，但可能不完全等同于服务器执行时的绑定
+                if self._db_conn and not self._db_conn.closed:
+                    # Mogrify expects a query string, not a Composed object directly for params
+                    # We need to get the string version of query_template_obj first
+                    base_sql_str = query_template_obj.as_string(self._db_conn)
+                    if condition_params: # mogrify needs params as a tuple or dict
+                        mogrified_sql = self._db_conn.cursor().mogrify(base_sql_str, condition_params).decode(self._db_conn.encoding or 'utf-8')
+                    else:
+                        mogrified_sql = base_sql_str
+                    self.filter_sql_preview_textedit.setText(mogrified_sql)
+                else: # 如果没有连接，就显示模板和参数
+                    self.filter_sql_preview_textedit.setText(
+                        f"-- SQL Template --\n{str(query_template_obj)}\n-- Params --\n{condition_params}"
+                    )
+            except Exception as e_preview:
+                # 如果生成预览失败，显示原始模板和参数
+                self.filter_sql_preview_textedit.setText(
+                    f"-- Error generating SQL preview: {e_preview}\n"
+                    f"-- SQL Template --\n{str(query_template_obj)}\n-- Params --\n{condition_params}"
+                )
+            # --- 结束更新 ---
+
             self._db_cursor.execute(query_template_obj, condition_params)
             items = self._db_cursor.fetchall()
             self.item_list.clear()

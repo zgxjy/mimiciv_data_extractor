@@ -10,39 +10,16 @@ from typing import List, Tuple, Dict, Any, Optional
 
 # 定义主构建函数
 def build_special_data_sql(
-    target_cohort_table_name: str,             # 例如 "mimiciv_data.my_cohort"
-    base_new_column_name: str,                 # 用户输入的新列基础名
-    panel_specific_config: Dict[str, Any],     # 从活动 SourceConfigPanel.get_panel_config() 获取
+    target_cohort_table_name: str,             
+    base_new_column_name: str,                 
+    panel_specific_config: Dict[str, Any],     
     for_execution: bool = False,
     preview_limit: int = 100
 ) -> Tuple[Optional[Any], Optional[str], Optional[List[Any]], List[Tuple[str, str]]]:
     """
     构建用于专项数据提取的SQL查询或执行步骤。
-
-    参数:
-    - target_cohort_table_name: 完整的目标队列表名 (schema.table)。
-    - base_new_column_name: 用户定义的新列的基础名称。
-    - panel_specific_config: 一个字典，包含从特定数据源面板获取的配置，例如：
-        {
-            "source_event_table": str,          # e.g., "mimiciv_icu.chartevents"
-            "item_id_column_in_event_table": str, # e.g., "itemid"
-            "value_column_to_extract": Optional[str], # e.g., "valuenum" or "value", or None
-            "time_column_in_event_table": Optional[str],  # e.g., "charttime"
-            "selected_item_ids": List[str],
-            # "item_filter_conditions": (sql_template, params), # 这个通常用于面板内部筛选字典表，不直接用于这里
-            "aggregation_methods": Optional[Dict[str, bool]], # e.g., {"first": True, "mean": True}
-            "event_outputs": Optional[Dict[str, bool]],    # e.g., {"exists": True, "countevt": True}
-            "time_window_text": str, # 用户选择的时间窗口描述文本
-            "cte_join_on_cohort_override": Optional[pgsql.SQL] # 面板可能提供的特殊JOIN队列表方式
-        }
-    - for_execution: 如果为True，返回执行步骤列表；否则返回预览SQL对象。
-    - preview_limit: 预览时限制的行数。
-
-    返回:
-    - (sql_object_or_execution_steps, 
-       error_message_or_execution_type_signal, 
-       params_for_cte_or_new_cols_desc, 
-       generated_column_details_for_preview)
+    
+    # ... [参数和返回值文档保持不变] ...
     """
     generated_column_details_for_preview = [] # [(col_name_str, col_type_display_str), ...]
     
@@ -152,61 +129,67 @@ def build_special_data_sql(
 
     # --- 5. 构建聚合逻辑 ---
     selected_methods_details = [] 
-    type_map_pgsql_to_str = { "NUMERIC": "Numeric", "INTEGER": "Integer", "BOOLEAN": "Boolean", "TEXT": "Text" }
+    type_map = { "NUMERIC": "Numeric", "INTEGER": "Integer", "BOOLEAN": "Boolean", "TEXT": "Text" }
     is_text_extraction = (value_column_to_extract == "value")
     
-    # 这里的 conn_for_type_check 用于辅助获取SQL类型字符串，理想情况是不需要它的
-    # 但 pgsql.SQL("NUMERIC").as_string(None) 会报错，它需要一个连接上下文
-    # 我们可以创建一个临时的dummy连接
-    dummy_conn_for_as_string = None
-    try:
-        dummy_conn_for_as_string = psycopg2.connect(dbname='dummy') # 用于 .as_string()
-        
-        if aggregation_methods: # 处理数值或文本值的聚合
-            method_configs = []
-            if not is_text_extraction: # 数值型
-                 method_configs = [
-                    ("first", "(array_agg({val} ORDER BY {time} ASC NULLS LAST))[1]", pgsql.SQL("NUMERIC")),
-                    ("last", "(array_agg({val} ORDER BY {time} DESC NULLS LAST))[1]", pgsql.SQL("NUMERIC")),
-                    ("min", "MIN({val})", pgsql.SQL("NUMERIC")), ("max", "MAX({val})", pgsql.SQL("NUMERIC")),
-                    ("mean", "AVG({val})", pgsql.SQL("NUMERIC")), ("countval", "COUNT({val})", pgsql.SQL("INTEGER")),
-                ]
-            else: # 文本型
-                method_configs = [
-                    ("first", "(array_agg({val} ORDER BY {time} ASC NULLS LAST))[1]", pgsql.SQL("TEXT")), # suffix: _first_text
-                    ("last", "(array_agg({val} ORDER BY {time} DESC NULLS LAST))[1]", pgsql.SQL("TEXT")),  # _last_text
-                    ("min", "MIN(CAST({val} AS TEXT))", pgsql.SQL("TEXT")), # _min_text
-                    ("max", "MAX(CAST({val} AS TEXT))", pgsql.SQL("TEXT")), # _max_text
-                    ("countval", "COUNT(CASE WHEN {val} IS NOT NULL AND CAST({val} AS TEXT) <> '' THEN 1 END)", pgsql.SQL("INTEGER")) # _counttext
-                ]
+    # 新方式：不需要数据库连接获取 SQL 类型字符串
+    def get_sql_type_str(sql_obj):
+        """从 SQL 对象获取类型字符串"""
+        if isinstance(sql_obj, pgsql.SQL):
+            # 提取字符串内容并清理
+            raw_str = str(sql_obj)
+            # 移除 SQL(...) 和引号
+            clean_str = raw_str.replace('SQL(', '').replace(')', '').strip("'\"")
+            return clean_str
+        return "UNKNOWN"
+    
+    if aggregation_methods: # 处理数值或文本值的聚合
+        method_configs = []
+        if not is_text_extraction: # 数值型
+             method_configs = [
+                ("first", "(array_agg({val} ORDER BY {time} ASC NULLS LAST))[1]", pgsql.SQL("NUMERIC")),
+                ("last", "(array_agg({val} ORDER BY {time} DESC NULLS LAST))[1]", pgsql.SQL("NUMERIC")),
+                ("min", "MIN({val})", pgsql.SQL("NUMERIC")), ("max", "MAX({val})", pgsql.SQL("NUMERIC")),
+                ("mean", "AVG({val})", pgsql.SQL("NUMERIC")), ("countval", "COUNT({val})", pgsql.SQL("INTEGER")),
+            ]
+        else: # 文本型
+            method_configs = [
+                ("first", "(array_agg({val} ORDER BY {time} ASC NULLS LAST))[1]", pgsql.SQL("TEXT")), # suffix: _first_text
+                ("last", "(array_agg({val} ORDER BY {time} DESC NULLS LAST))[1]", pgsql.SQL("TEXT")),  # _last_text
+                ("min", "MIN(CAST({val} AS TEXT))", pgsql.SQL("TEXT")), # _min_text
+                ("max", "MAX(CAST({val} AS TEXT))", pgsql.SQL("TEXT")), # _max_text
+                ("countval", "COUNT(CASE WHEN {val} IS NOT NULL AND CAST({val} AS TEXT) <> '' THEN 1 END)", pgsql.SQL("INTEGER")) # _counttext
+            ]
 
-            for method_key, agg_template, col_type_sql_obj in method_configs:
-                if aggregation_methods.get(method_key): # 如果面板中这个方法被选中了
-                    actual_suffix = method_key
-                    if is_text_extraction: # 为文本添加后缀以区分
-                        if method_key not in ["countval"]: actual_suffix = f"{method_key}_text"
-                        else: actual_suffix = "counttext"
-                    
-                    final_col_name_str = f"{base_new_column_name}_{actual_suffix}"
-                    is_valid, err = validate_column_name(final_col_name_str) # <-- 新的调用
-                    if not is_valid: return None, f"列名错误 ({final_col_name_str}): {err}", params_for_cte, []
-                    
-                    selected_methods_details.append((final_col_name_str, pgsql.Identifier(final_col_name_str), agg_template, col_type_sql_obj))
-                    col_type_str_raw = col_type_sql_obj.as_string(dummy_conn_for_as_string)
-                    generated_column_details_for_preview.append((final_col_name_str, type_map_pgsql_to_str.get(col_type_str_raw.upper(), col_type_str_raw)))
+        for method_key, agg_template, col_type_sql_obj in method_configs:
+            if aggregation_methods.get(method_key): # 如果面板中这个方法被选中了
+                actual_suffix = method_key
+                if is_text_extraction: # 为文本添加后缀以区分
+                    if method_key not in ["countval"]: actual_suffix = f"{method_key}_text"
+                    else: actual_suffix = "counttext"
+                
+                final_col_name_str = f"{base_new_column_name}_{actual_suffix}"
+                is_valid, err = validate_column_name(final_col_name_str)
+                if not is_valid: return None, f"列名错误 ({final_col_name_str}): {err}", params_for_cte, []
+                
+                selected_methods_details.append((final_col_name_str, pgsql.Identifier(final_col_name_str), agg_template, col_type_sql_obj))
+                
+                # 无需数据库连接的 SQL 类型字符串
+                col_type_str_raw = get_sql_type_str(col_type_sql_obj)
+                generated_column_details_for_preview.append((final_col_name_str, type_map.get(col_type_str_raw.upper(), col_type_str_raw)))
 
-        elif event_outputs: # 事件型输出
-            method_configs = [("exists", "TRUE", pgsql.SQL("BOOLEAN")), ("countevt", "COUNT(*)", pgsql.SQL("INTEGER"))]
-            for method_key, agg_template, col_type_sql_obj in method_configs:
-                if event_outputs.get(method_key):
-                    final_col_name_str = f"{base_new_column_name}_{method_key}"
-                    is_valid, err = BaseSourceConfigPanel._validate_column_name_static(final_col_name_str)
-                    if not is_valid: return None, f"列名错误 ({final_col_name_str}): {err}", params_for_cte, []
-                    selected_methods_details.append((final_col_name_str, pgsql.Identifier(final_col_name_str), agg_template, col_type_sql_obj))
-                    col_type_str_raw = col_type_sql_obj.as_string(dummy_conn_for_as_string)
-                    generated_column_details_for_preview.append((final_col_name_str, type_map_pgsql_to_str.get(col_type_str_raw.upper(), col_type_str_raw)))
-    finally:
-        if dummy_conn_for_as_string: dummy_conn_for_as_string.close()
+    elif event_outputs: # 事件型输出
+        method_configs = [("exists", "TRUE", pgsql.SQL("BOOLEAN")), ("countevt", "COUNT(*)", pgsql.SQL("INTEGER"))]
+        for method_key, agg_template, col_type_sql_obj in method_configs:
+            if event_outputs.get(method_key):
+                final_col_name_str = f"{base_new_column_name}_{method_key}"
+                is_valid, err = validate_column_name(final_col_name_str)  # 使用正确的函数
+                if not is_valid: return None, f"列名错误 ({final_col_name_str}): {err}", params_for_cte, []
+                selected_methods_details.append((final_col_name_str, pgsql.Identifier(final_col_name_str), agg_template, col_type_sql_obj))
+                
+                # 无需数据库连接的 SQL 类型字符串
+                col_type_str_raw = get_sql_type_str(col_type_sql_obj)
+                generated_column_details_for_preview.append((final_col_name_str, type_map.get(col_type_str_raw.upper(), col_type_str_raw)))
 
 
     if not selected_methods_details:
