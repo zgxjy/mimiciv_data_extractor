@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, Q
                           QTextEdit, QComboBox, QGroupBox, # QSplitter 被移除
                           QRadioButton, QButtonGroup, QStackedWidget,
                           QLineEdit, QProgressBar, QAbstractItemView, QApplication,
-                          QScrollArea) # QScrollArea 保持导入
+                          QScrollArea,QSizePolicy) # QScrollArea 保持导入
 from PySide6.QtCore import Qt, Signal, Slot, QObject, QThread
 import psycopg2
 import psycopg2.sql as pgsql
@@ -146,7 +146,9 @@ class SpecialDataMasterTab(QWidget):
         source_main_layout.addWidget(self.search_field_hint_label)
         
         self.config_panel_stack = QStackedWidget()
-        self.config_panel_stack.setMinimumHeight(450) # 给面板一个合理的最小高度
+        # self.config_panel_stack.setMinimumHeight(450) # 给面板一个合理的最小高度
+        self.config_panel_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding) # 或者 QSizePolicy.Preferred
+        
         source_main_layout.addWidget(self.config_panel_stack)
         self._create_config_panels()
         content_layout.addWidget(source_and_panel_group)
@@ -395,7 +397,7 @@ class SpecialDataMasterTab(QWidget):
             cohort_table_selected = bool(self.selected_cohort_table)
             general_ok_for_panel_filter = db_connected and cohort_table_selected
             
-            print(f"DEBUG Master: Passing general_ok_for_panel_filter={general_ok_for_panel_filter} to panel {active_panel.__class__.__name__}")
+            # print(f"DEBUG Master: Passing general_ok_for_panel_filter={general_ok_for_panel_filter} to panel {active_panel.__class__.__name__}")
             active_panel.update_panel_action_buttons_state(general_ok_for_panel_filter)
 
     def execute_merge(self): 

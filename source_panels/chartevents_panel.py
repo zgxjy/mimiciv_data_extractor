@@ -21,54 +21,52 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
         panel_layout.setSpacing(10) # 给面板内的主组之间增加一点间距
 
         # --- “筛选...” GroupBox ---
-        # 根据面板类型替换标题
-        filter_group = QGroupBox("筛选监测指标 (来自 mimiciv_hosp.d_items)") 
-        filter_group_layout = QVBoxLayout(filter_group)
-        filter_group_layout.setSpacing(8) # 组内元素间距
+        filter_group = QGroupBox("筛选监测指标 (来自 mimiciv_hosp.d_items)")
+        filter_group_layout = QVBoxLayout(filter_group) # 主垂直布局
+        filter_group_layout.setSpacing(8)
 
         # 1. 条件构建区 (ConditionGroupWidget in QScrollArea)
         self.condition_widget = ConditionGroupWidget(is_root=True)
-        self.condition_widget.condition_changed.connect(self.config_changed_signal.emit) 
-        
+        self.condition_widget.condition_changed.connect(self.config_changed_signal.emit)
+
         cg_scroll_area_panel = QScrollArea()
         cg_scroll_area_panel.setWidgetResizable(True)
         cg_scroll_area_panel.setWidget(self.condition_widget)
-        # 设置一个合理的最小高度，让条件组初始时能显示几行
-        # 如果希望它尽可能扩展，可以减小这个值，依赖伸展因子
-        cg_scroll_area_panel.setMinimumHeight(200) 
-        # 为条件滚动区设置较大的伸展因子，使其优先获得垂直空间
-        filter_group_layout.addWidget(cg_scroll_area_panel, 2) # Stretch factor 2
-        
-        # 2. 执行筛选操作区 (按钮居中或居右)
-        filter_button_layout = QHBoxLayout()
-        filter_button_layout.addStretch(1) 
-        # 根据面板类型替换按钮文本
+        cg_scroll_area_panel.setMinimumHeight(200) # 调整一个合适的最小高度
+        filter_group_layout.addWidget(cg_scroll_area_panel, 2) # Stretch factor 2 (使其优先扩展)
+
+        # 2. 操作按钮区
+        filter_action_layout = QHBoxLayout() 
+        filter_action_layout.addStretch() 
         self.filter_items_btn = QPushButton("筛选指标项目") 
         self.filter_items_btn.clicked.connect(self._filter_items_action)
-        filter_button_layout.addWidget(self.filter_items_btn)
-        filter_button_layout.addStretch(1) 
-        filter_group_layout.addLayout(filter_button_layout)
+        filter_action_layout.addWidget(self.filter_items_btn)
+        # filter_action_layout.addStretch() # 如果想让按钮靠右，取消注释这个，并注释上面的 addStretch()
+        filter_group_layout.addLayout(filter_action_layout) # 这个布局高度会比较固定
 
-        # 可选的分隔线
+        # 可选的分隔线，增加视觉分离
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setFrameShadow(QFrame.Shadow.Sunken)
         filter_group_layout.addWidget(separator)
 
-        # 3. 筛选结果显示区 (QListWidget 和 QLabel)
+        # 3. 筛选结果显示区 (QListWidget in QScrollArea, 和 QLabel)
         self.item_list = QListWidget()
         self.item_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.item_list.itemSelectionChanged.connect(self._on_item_selection_changed)
-        # 给列表一个合理的最小高度，但也允许它扩展
-        self.item_list.setMinimumHeight(120) 
-        # 为列表设置伸展因子，但小于条件滚动区
-        filter_group_layout.addWidget(self.item_list, 1) # Stretch factor 1
+
+        item_list_scroll_area = QScrollArea() # 将 QListWidget 放入 QScrollArea
+        item_list_scroll_area.setWidgetResizable(True)
+        item_list_scroll_area.setWidget(self.item_list)
+        item_list_scroll_area.setMinimumHeight(100) # 调整一个合适的最小高度
+        filter_group_layout.addWidget(item_list_scroll_area, 1) # Stretch factor 1
 
         self.selected_items_label = QLabel("已选项目: 0")
-        self.selected_items_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.selected_items_label.setAlignment(Qt.AlignmentFlag.AlignRight) # 标签靠右
         filter_group_layout.addWidget(self.selected_items_label)
-        
-        panel_layout.addWidget(filter_group)
+
+        # 将 filter_group 添加到主面板布局
+        panel_layout.addWidget(filter_group) 
 
         # --- “提取逻辑” GroupBox ---
         # (这部分结构根据CharteventsPanel的具体需求来确定，以下是基于之前的代码)
@@ -207,7 +205,7 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
         # 筛选按钮的可用性取决于通用配置OK 并且 面板内的条件组有有效输入
         can_filter = general_config_ok and has_valid_conditions_in_panel
         
-        print(f"DEBUG Panel {self.__class__.__name__}: general_ok={general_config_ok}, panel_conditions_ok={has_valid_conditions_in_panel}, can_filter={can_filter}")
+        # print(f"DEBUG Panel {self.__class__.__name__}: general_ok={general_config_ok}, panel_conditions_ok={has_valid_conditions_in_panel}, can_filter={can_filter}")
         self.filter_items_btn.setEnabled(can_filter)
 
 # --- END OF MODIFIED source_panels/chartevents_panel.py ---

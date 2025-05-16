@@ -1,7 +1,7 @@
 # --- START OF FILE source_panels/procedure_panel.py ---
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QListWidget, QListWidgetItem, QAbstractItemView,
-                               QApplication, QGroupBox, QLabel, QMessageBox, QScrollArea)
+                               QApplication, QGroupBox, QLabel, QMessageBox, QScrollArea,QFrame)
 from PySide6.QtCore import Qt, Slot
 
 from .base_panel import BaseSourceConfigPanel
@@ -19,39 +19,51 @@ class ProcedureConfigPanel(BaseSourceConfigPanel):
         panel_layout.setContentsMargins(0,0,0,0)
 
         filter_group = QGroupBox("筛选操作/手术 (来自 mimc_hosp.d_icd_procedures)")
-        filter_group_layout = QVBoxLayout(filter_group)
+        filter_group_layout = QVBoxLayout(filter_group) # 主垂直布局
+        filter_group_layout.setSpacing(8)
 
-        # search_field_hint_label 和 condition_widget 由主面板创建和管理
-        self.condition_widget = ConditionGroupWidget(is_root=True) # search_field 会在 populate_panel_if_needed 中设置
-        self.condition_widget.condition_changed.connect(self.config_changed_signal.emit) 
-        filter_group_layout.addWidget(self.condition_widget)
-        # 将 ConditionGroupWidget 放入 QScrollArea
+        # 1. 条件构建区 (ConditionGroupWidget in QScrollArea)
+        self.condition_widget = ConditionGroupWidget(is_root=True)
+        self.condition_widget.condition_changed.connect(self.config_changed_signal.emit)
+
         cg_scroll_area_panel = QScrollArea()
         cg_scroll_area_panel.setWidgetResizable(True)
         cg_scroll_area_panel.setWidget(self.condition_widget)
-        # 通常面板内的 ConditionGroupWidget 不需要设置固定的最小/最大高度，
-        # 因为它会填充 QStackedWidget 中的可用空间，而 QStackedWidget 的大小由主Tab的布局决定。
-        # 如果需要，可以设置: 
-        cg_scroll_area_panel.setMinimumHeight(200)
-        filter_group_layout.addWidget(cg_scroll_area_panel) # 添加滚动区域 
-        
-        # -- 修改开始 --
-        filter_action_layout = QHBoxLayout() # 创建一个新的 QHBoxLayout
-        filter_action_layout.addStretch()      # 将按钮推到右边
-        self.filter_items_btn = QPushButton("筛选指标项目") # 或者 "筛选化验项目" 等
+        cg_scroll_area_panel.setMinimumHeight(200) # 调整一个合适的最小高度
+        filter_group_layout.addWidget(cg_scroll_area_panel, 2) # Stretch factor 2 (使其优先扩展)
+
+        # 2. 操作按钮区
+        filter_action_layout = QHBoxLayout() 
+        filter_action_layout.addStretch() 
+        self.filter_items_btn = QPushButton("筛选指标项目") 
         self.filter_items_btn.clicked.connect(self._filter_items_action)
         filter_action_layout.addWidget(self.filter_items_btn)
-        filter_group_layout.addLayout(filter_action_layout) # 将这个 QHBoxLayout 添加到 filter_group_layout
-        # -- 修改结束 --
-        
+        # filter_action_layout.addStretch() # 如果想让按钮靠右，取消注释这个，并注释上面的 addStretch()
+        filter_group_layout.addLayout(filter_action_layout) # 这个布局高度会比较固定
+
+        # 可选的分隔线，增加视觉分离
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        filter_group_layout.addWidget(separator)
+
+        # 3. 筛选结果显示区 (QListWidget in QScrollArea, 和 QLabel)
         self.item_list = QListWidget()
         self.item_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.item_list.itemSelectionChanged.connect(self._on_item_selection_changed)
-        filter_group_layout.addWidget(self.item_list)
+
+        item_list_scroll_area = QScrollArea() # 将 QListWidget 放入 QScrollArea
+        item_list_scroll_area.setWidgetResizable(True)
+        item_list_scroll_area.setWidget(self.item_list)
+        item_list_scroll_area.setMinimumHeight(100) # 调整一个合适的最小高度
+        filter_group_layout.addWidget(item_list_scroll_area, 1) # Stretch factor 1
 
         self.selected_items_label = QLabel("已选项目: 0")
+        self.selected_items_label.setAlignment(Qt.AlignmentFlag.AlignRight) # 标签靠右
         filter_group_layout.addWidget(self.selected_items_label)
-        panel_layout.addWidget(filter_group)
+
+        # 将 filter_group 添加到主面板布局
+        panel_layout.addWidget(filter_group) 
 
         logic_group = QGroupBox("提取逻辑")
         logic_group_layout = QVBoxLayout(logic_group)
@@ -157,7 +169,7 @@ class ProcedureConfigPanel(BaseSourceConfigPanel):
         # 筛选按钮的可用性取决于通用配置OK 并且 面板内的条件组有有效输入
         can_filter = general_config_ok and has_valid_conditions_in_panel
         
-        print(f"DEBUG Panel {self.__class__.__name__}: general_ok={general_config_ok}, panel_conditions_ok={has_valid_conditions_in_panel}, can_filter={can_filter}")
+        # print(f"DEBUG Panel {self.__class__.__name__}: general_ok={general_config_ok}, panel_conditions_ok={has_valid_conditions_in_panel}, can_filter={can_filter}")
         self.filter_items_btn.setEnabled(can_filter)
 
 # --- END OF FILE source_panels/procedure_panel.py ---
