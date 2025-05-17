@@ -1,4 +1,4 @@
-# --- START OF FILE source_panels/procedure_panel.py ---
+# --- START OF MODIFIED source_panels/procedure_panel.py ---
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QListWidget, QListWidgetItem, QAbstractItemView,QTextEdit,
                                QApplication, QGroupBox, QLabel, QMessageBox, QScrollArea,QFrame)
@@ -19,80 +19,82 @@ class ProcedureConfigPanel(BaseSourceConfigPanel):
         panel_layout.setContentsMargins(0,0,0,0)
 
         filter_group = QGroupBox("筛选操作/手术 (来自 mimc_hosp.d_icd_procedures)")
-        filter_group_layout = QVBoxLayout(filter_group) # 主垂直布局
+        filter_group_layout = QVBoxLayout(filter_group)
         filter_group_layout.setSpacing(8)
 
-        # 1. 条件构建区 (ConditionGroupWidget in QScrollArea)
         self.condition_widget = ConditionGroupWidget(is_root=True)
         self.condition_widget.condition_changed.connect(self.config_changed_signal.emit)
 
         cg_scroll_area_panel = QScrollArea()
         cg_scroll_area_panel.setWidgetResizable(True)
         cg_scroll_area_panel.setWidget(self.condition_widget)
-        cg_scroll_area_panel.setMinimumHeight(200) # 调整一个合适的最小高度
-        filter_group_layout.addWidget(cg_scroll_area_panel, 2) # Stretch factor 2 (使其优先扩展)
+        cg_scroll_area_panel.setMinimumHeight(200)
+        filter_group_layout.addWidget(cg_scroll_area_panel, 2)
 
-        # 2. 操作按钮区
         filter_action_layout = QHBoxLayout() 
         filter_action_layout.addStretch() 
         self.filter_items_btn = QPushButton("筛选指标项目") 
         self.filter_items_btn.clicked.connect(self._filter_items_action)
         filter_action_layout.addWidget(self.filter_items_btn)
-        # filter_action_layout.addStretch() # 如果想让按钮靠右，取消注释这个，并注释上面的 addStretch()
-        filter_group_layout.addLayout(filter_action_layout) # 这个布局高度会比较固定
+        filter_group_layout.addLayout(filter_action_layout)
 
-        # 可选的分隔线，增加视觉分离
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setFrameShadow(QFrame.Shadow.Sunken)
-        filter_group_layout.addWidget(separator)
+        separator1 = QFrame()
+        separator1.setFrameShape(QFrame.Shape.HLine)
+        separator1.setFrameShadow(QFrame.Shadow.Sunken)
+        filter_group_layout.addWidget(separator1)
 
-        # --- 新增：筛选SQL预览区 ---
-        self.filter_sql_preview_label = QLabel("最近筛选SQL预览:") # 可选的标签
+        self.filter_sql_preview_label = QLabel("最近筛选SQL预览:")
         filter_group_layout.addWidget(self.filter_sql_preview_label)
         self.filter_sql_preview_textedit = QTextEdit()
         self.filter_sql_preview_textedit.setReadOnly(True)
-        self.filter_sql_preview_textedit.setFixedHeight(60) # 设置一个合适的高度，例如3-4行
+        self.filter_sql_preview_textedit.setFixedHeight(60)
         self.filter_sql_preview_textedit.setPlaceholderText("执行“筛选指标项目”后将在此显示SQL...")
         filter_group_layout.addWidget(self.filter_sql_preview_textedit)
-        # --- 结束新增 ---
+        
+        separator2 = QFrame()
+        separator2.setFrameShape(QFrame.Shape.HLine)
+        separator2.setFrameShadow(QFrame.Shadow.Sunken)
+        filter_group_layout.addWidget(separator2)
 
-        # 可选的分隔线，增加视觉分离
-        separator = QFrame()
-        # ... (separator setup) ...
-        filter_group_layout.addWidget(separator)
-
-        # 3. 筛选结果显示区 (QListWidget in QScrollArea, 和 QLabel)
         self.item_list = QListWidget()
         self.item_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.item_list.itemSelectionChanged.connect(self._on_item_selection_changed)
 
-        item_list_scroll_area = QScrollArea() # 将 QListWidget 放入 QScrollArea
+        item_list_scroll_area = QScrollArea()
         item_list_scroll_area.setWidgetResizable(True)
         item_list_scroll_area.setWidget(self.item_list)
-        item_list_scroll_area.setMinimumHeight(100) # 调整一个合适的最小高度
-        filter_group_layout.addWidget(item_list_scroll_area, 1) # Stretch factor 1
+        item_list_scroll_area.setMinimumHeight(100)
+        filter_group_layout.addWidget(item_list_scroll_area, 1)
 
         self.selected_items_label = QLabel("已选项目: 0")
-        self.selected_items_label.setAlignment(Qt.AlignmentFlag.AlignRight) # 标签靠右
+        self.selected_items_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         filter_group_layout.addWidget(self.selected_items_label)
-
-        # 将 filter_group 添加到主面板布局
         panel_layout.addWidget(filter_group) 
 
         logic_group = QGroupBox("提取逻辑")
         logic_group_layout = QVBoxLayout(logic_group)
 
         self.event_output_widget = EventOutputWidget() 
-        self.event_output_widget.output_type_changed.connect(self.config_changed_signal.emit)
+        self.event_output_widget.output_type_changed.connect(self._handle_logic_or_time_change) # 修改点1
         logic_group_layout.addWidget(self.event_output_widget)
 
         self.time_window_widget = TimeWindowSelectorWidget(label_text="时间窗口:")
-        self.time_window_widget.time_window_changed.connect(lambda: self.config_changed_signal.emit)
+        self.time_window_widget.time_window_changed.connect(self._handle_logic_or_time_change) # 修改点2 (参数是 str)
         logic_group_layout.addWidget(self.time_window_widget)
         
         panel_layout.addWidget(logic_group)
         self.setLayout(panel_layout)
+
+    # 新增槽函数处理逻辑或时间窗口的变化
+    @Slot() 
+    @Slot(str) 
+    def _handle_logic_or_time_change(self, new_text_if_time_window=None):
+        print(f"DEBUG Panel ({self.get_friendly_source_name()}): _handle_logic_or_time_change triggered.")
+        if hasattr(self, 'time_window_widget') and self.time_window_widget:
+            print(f"    Current time window from widget: '{self.time_window_widget.get_current_time_window_text()}'")
+        if hasattr(self, 'event_output_widget') and self.event_output_widget:
+             print(f"    Current event outputs from widget: {self.event_output_widget.get_selected_outputs()}")
+        self.config_changed_signal.emit()
 
     def populate_panel_if_needed(self):
         available_fields = [
@@ -116,50 +118,45 @@ class ProcedureConfigPanel(BaseSourceConfigPanel):
     def get_item_filtering_details(self) -> tuple:
         return "mimiciv_hosp.d_icd_procedures", "long_title", "icd_code", "筛选字段: d_icd_procedures.long_title", None
     
-    # def get_value_column_for_aggregation(self) -> str | None: return None
-    # def get_time_column_for_windowing(self) -> str | None: return "chartdate" # procedures_icd 有 chartdate
-
     def get_panel_config(self) -> dict:
-        # ... (获取 condition_sql, condition_params, selected_item_ids) ...
-        condition_sql, condition_params = self.condition_widget.get_condition() # 假设你这样获取
-        selected_items = self.get_selected_item_ids() # 假设你这样获取
-
-        current_time_window = self.time_window_widget.get_current_time_window_text()
+        condition_sql, condition_params = self.condition_widget.get_condition()
         
+        current_time_window = self.time_window_widget.get_current_time_window_text()
+        current_event_outputs = self.event_output_widget.get_selected_outputs()
+        selected_ids = self.get_selected_item_ids()
+
+        print(f"DEBUG Panel ({self.get_friendly_source_name()}): get_panel_config() called.")
+        print(f"    Time window from widget in get_panel_config: '{current_time_window}'")
+        print(f"    Event outputs from widget in get_panel_config: {current_event_outputs}")
+        print(f"    Selected IDs in get_panel_config: {selected_ids}")
+
+        if not any(current_event_outputs.values()):
+            print(f"DEBUG Panel ({self.get_friendly_source_name()}): No event output selected, returning empty config.")
+            return {}
+
         join_override_sql = None
-        event_time_column = "chartdate" # procedures_icd 有 chartdate
+        event_time_column = "chartdate" 
 
         if current_time_window == "住院以前 (既往史)":
             join_override_sql = pgsql.SQL(
-                "FROM {event_table} {evt_alias} " # e.g., mimiciv_hosp.procedures_icd "evt"
+                "FROM {event_table} {evt_alias} " 
                 "JOIN {cohort_table} {coh_alias} ON {evt_alias}.subject_id = {coh_alias}.subject_id "
                 "JOIN mimiciv_hosp.admissions {adm_evt} ON {evt_alias}.hadm_id = {adm_evt}.hadm_id"
             )
-            # 对于“住院以前”，我们比较的是adm_evt.admittime，所以 procedures_icd.chartdate 可能不是必需的
-            # 但 sql_builder_special.py 的时间窗口逻辑可能会尝试使用它，如果存在的话。
-            # 如果“住院以前”不需要 evt.chartdate 参与时间比较，可以考虑将 event_time_column 设为 None
-            # 但为了通用性，sql_builder_special.py 中的时间窗口判断可能需要更细致。
-            # 目前，只要JOIN正确，WHERE "adm_evt".admittime < cohort.admittime 就会起作用。
 
-        # elif current_time_window == "整个住院期间 (当前入院)":
-            # 默认的 JOIN (evt.hadm_id = cohort.hadm_id) 可能是可以的
-            # 时间条件会是 evt.chartdate BETWEEN cohort.admittime AND cohort.dischtime
-            # pass # 不需要 join_override_sql
-
-        # ... 其他时间窗口逻辑 (如果需要特殊的JOIN)
-
-        return {
+        config = {
             "source_event_table": "mimiciv_hosp.procedures_icd",
-            # "source_dict_table": "mimiciv_hosp.d_icd_procedures", # 用于UI筛选，builder不直接用
-            "item_id_column_in_event_table": "icd_code", # procedures_icd 使用 icd_code
+            "item_id_column_in_event_table": "icd_code",
             "item_filter_conditions": (condition_sql, condition_params),
-            "selected_item_ids": selected_items,
-            "value_column_to_extract": None, # Procedures 是事件型的
-            "time_column_in_event_table": event_time_column, # procedures_icd 有 chartdate
-            "event_outputs": self.event_output_widget.get_selected_outputs(),
+            "selected_item_ids": selected_ids,
+            "value_column_to_extract": None, 
+            "time_column_in_event_table": event_time_column,
+            "event_outputs": current_event_outputs,
             "time_window_text": current_time_window,
             "cte_join_on_cohort_override": join_override_sql
         }
+        print(f"DEBUG Panel ({self.get_friendly_source_name()}): Returning panel_config: {config}")
+        return config
 
     def clear_panel_state(self):
         self.condition_widget.clear_all()
@@ -170,11 +167,11 @@ class ProcedureConfigPanel(BaseSourceConfigPanel):
         self.time_window_widget.clear_selection()
         self.config_changed_signal.emit()
         
-    # _on_item_selection_changed, _filter_items_action, update_panel_action_buttons_state 与 LabeventsConfigPanel 类似
     def _on_item_selection_changed(self):
         count = len(self.item_list.selectedItems())
         self.selected_items_label.setText(f"已选项目: {count}")
         self.config_changed_signal.emit()
+
     @Slot()
     def _filter_items_action(self):
         if not self._connect_panel_db(): QMessageBox.warning(self, "数据库连接失败", "无法连接到数据库以筛选项目。"); return
@@ -188,31 +185,24 @@ class ProcedureConfigPanel(BaseSourceConfigPanel):
         try:
             query_template_obj = pgsql.SQL("SELECT {id_col_ident}, {name_col_ident} FROM {dict_table_ident} WHERE {condition} ORDER BY {name_col_ident} LIMIT 500").format(id_col_ident=pgsql.Identifier(id_col),name_col_ident=pgsql.Identifier(name_col),dict_table_ident=pgsql.SQL(dict_table),condition=pgsql.SQL(condition_sql_template))
             
-            # --- 更新SQL预览文本框 ---
             try:
-                # 尝试使用数据库连接来“美化”SQL（如果参数是元组，会替换 %s）
-                # 注意：mogrify 用于调试，它会处理参数替换，但可能不完全等同于服务器执行时的绑定
                 if self._db_conn and not self._db_conn.closed:
-                    # Mogrify expects a query string, not a Composed object directly for params
-                    # We need to get the string version of query_template_obj first
                     base_sql_str = query_template_obj.as_string(self._db_conn)
-                    if condition_params: # mogrify needs params as a tuple or dict
+                    if condition_params: 
                         mogrified_sql = self._db_conn.cursor().mogrify(base_sql_str, condition_params).decode(self._db_conn.encoding or 'utf-8')
                     else:
                         mogrified_sql = base_sql_str
                     self.filter_sql_preview_textedit.setText(mogrified_sql)
-                else: # 如果没有连接，就显示模板和参数
+                else: 
                     self.filter_sql_preview_textedit.setText(
                         f"-- SQL Template --\n{str(query_template_obj)}\n-- Params --\n{condition_params}"
                     )
             except Exception as e_preview:
-                # 如果生成预览失败，显示原始模板和参数
                 self.filter_sql_preview_textedit.setText(
                     f"-- Error generating SQL preview: {e_preview}\n"
                     f"-- SQL Template --\n{str(query_template_obj)}\n-- Params --\n{condition_params}"
                 )
-            # --- 结束更新 ---                    
-
+                                 
             self._db_cursor.execute(query_template_obj, condition_params)
             items = self._db_cursor.fetchall()
             self.item_list.clear()
@@ -230,14 +220,8 @@ class ProcedureConfigPanel(BaseSourceConfigPanel):
             self.filter_items_btn.setEnabled(True); self._close_panel_db(); self.config_changed_signal.emit()
             
     def update_panel_action_buttons_state(self, general_config_ok: bool):
-        # general_config_ok: 表示主 Tab 的通用配置是否OK（数据库已连接，队列表已选择）
-        # has_valid_conditions_in_panel: 表示此面板内的 ConditionGroupWidget 是否有有效输入
         has_valid_conditions_in_panel = self.condition_widget.has_valid_input()
-        
-        # 筛选按钮的可用性取决于通用配置OK 并且 面板内的条件组有有效输入
         can_filter = general_config_ok and has_valid_conditions_in_panel
-        
-        # print(f"DEBUG Panel {self.__class__.__name__}: general_ok={general_config_ok}, panel_conditions_ok={has_valid_conditions_in_panel}, can_filter={can_filter}")
         self.filter_items_btn.setEnabled(can_filter)
 
-# --- END OF FILE source_panels/procedure_panel.py ---
+# --- END OF MODIFIED source_panels/procedure_panel.py ---
