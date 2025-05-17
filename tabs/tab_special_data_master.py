@@ -378,9 +378,9 @@ class SpecialDataMasterTab(QWidget):
 
         # ---- DEBUG PRINT (确保这些打印语句在这个函数内) ----
         active_panel_for_debug = self.config_panels.get(self.source_selection_group.checkedId())
-        print(f"DEBUG MasterTab (_are_configs_valid_for_action): 正在为面板验证: {active_panel_for_debug.get_friendly_source_name() if active_panel_for_debug else 'None'}")
-        print(f"DEBUG MasterTab (_are_configs_valid_for_action):   已选队列: {self.selected_cohort_table}")
-        print(f"DEBUG MasterTab (_are_configs_valid_for_action):   列名: '{col_name_text}', 是否有效: {is_valid_col_name}, 错误: {name_err}")
+        # print(f"DEBUG MasterTab (_are_configs_valid_for_action): 正在为面板验证: {active_panel_for_debug.get_friendly_source_name() if active_panel_for_debug else 'None'}")
+        # print(f"DEBUG MasterTab (_are_configs_valid_for_action):   已选队列: {self.selected_cohort_table}")
+        # print(f"DEBUG MasterTab (_are_configs_valid_for_action):   列名: '{col_name_text}', 是否有效: {is_valid_col_name}, 错误: {name_err}")
         # ---- END DEBUG ----
 
         if not is_valid_col_name: return False
@@ -389,7 +389,7 @@ class SpecialDataMasterTab(QWidget):
         panel_config = active_panel.get_panel_config()
 
         # ---- DEBUG PRINT (继续在这个函数内) ----
-        print(f"DEBUG MasterTab (_are_configs_valid_for_action):   来自面板的 Panel Config 字典: {panel_config}")
+        # print(f"DEBUG MasterTab (_are_configs_valid_for_action):   来自面板的 Panel Config 字典: {panel_config}")
         # ---- END DEBUG ----
 
         if not panel_config: return False
@@ -402,12 +402,12 @@ class SpecialDataMasterTab(QWidget):
         elif evt_outputs and isinstance(evt_outputs, dict) and any(evt_outputs.values()):
             any_method_selected = True
         
-        # ---- DEBUG PRINT ----
-        print(f"DEBUG MasterTab (_are_configs_valid_for_action):   配置中的 Agg 方法: {agg_methods}")
-        print(f"DEBUG MasterTab (_are_configs_valid_for_action):   配置中的 Evt 输出: {evt_outputs}")
-        print(f"DEBUG MasterTab (_are_configs_valid_for_action):   是否有任何方法被选中: {any_method_selected}")
-        print(f"DEBUG MasterTab (_are_configs_valid_for_action):   _are_configs_valid_for_action 返回: {any_method_selected}")
-        # ---- END DEBUG ----
+        # # ---- DEBUG PRINT ----
+        # print(f"DEBUG MasterTab (_are_configs_valid_for_action):   配置中的 Agg 方法: {agg_methods}")
+        # print(f"DEBUG MasterTab (_are_configs_valid_for_action):   配置中的 Evt 输出: {evt_outputs}")
+        # print(f"DEBUG MasterTab (_are_configs_valid_for_action):   是否有任何方法被选中: {any_method_selected}")
+        # print(f"DEBUG MasterTab (_are_configs_valid_for_action):   _are_configs_valid_for_action 返回: {any_method_selected}")
+        # # ---- END DEBUG ----
         return any_method_selected
 
 

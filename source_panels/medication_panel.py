@@ -85,18 +85,14 @@ class MedicationConfigPanel(BaseSourceConfigPanel):
         panel_layout.addWidget(logic_group)
         self.setLayout(panel_layout)
 
-    # 新增槽函数处理逻辑或时间窗口的变化
-    @Slot() # output_type_changed 不带参数
-    @Slot(str) # time_window_changed 带一个 str 参数
+    @Slot() 
+    @Slot(str) 
     def _handle_logic_or_time_change(self, new_text_if_time_window=None):
-        # 打印调试信息，确认槽被触发以及此时时间窗口组件的状态
-        # new_text_if_time_window 参数主要用于区分是哪个信号触发的（如果需要）
-        # 但对于 config_changed_signal.emit() 来说，有无参数都一样
-        print(f"DEBUG Panel ({self.get_friendly_source_name()}): _handle_logic_or_time_change triggered.")
-        if hasattr(self, 'time_window_widget') and self.time_window_widget:
-            print(f"    Current time window from widget: '{self.time_window_widget.get_current_time_window_text()}'")
-        if hasattr(self, 'event_output_widget') and self.event_output_widget:
-             print(f"    Current event outputs from widget: {self.event_output_widget.get_selected_outputs()}")
+        # print(f"DEBUG Panel ({self.get_friendly_source_name()}): _handle_logic_or_time_change triggered.") # 注释掉
+        # if hasattr(self, 'time_window_widget') and self.time_window_widget:
+        #     print(f"    Current time window from widget: '{self.time_window_widget.get_current_time_window_text()}'") # 注释掉
+        # if hasattr(self, 'event_output_widget') and self.event_output_widget:
+        #      print(f"    Current event outputs from widget: {self.event_output_widget.get_selected_outputs()}") # 注释掉
         self.config_changed_signal.emit()
 
 
@@ -127,14 +123,14 @@ class MedicationConfigPanel(BaseSourceConfigPanel):
         selected_ids = self.get_selected_item_ids()
 
         # 增加打印，确认 get_panel_config 获取到的值
-        print(f"DEBUG Panel ({self.get_friendly_source_name()}): get_panel_config() called.")
-        print(f"    Time window from widget in get_panel_config: '{current_time_window}'")
-        print(f"    Event outputs from widget in get_panel_config: {current_event_outputs}")
-        print(f"    Selected IDs in get_panel_config: {selected_ids}")
+        # print(f"DEBUG Panel ({self.get_friendly_source_name()}): get_panel_config() called.")
+        # print(f"    Time window from widget in get_panel_config: '{current_time_window}'")
+        # print(f"    Event outputs from widget in get_panel_config: {current_event_outputs}")
+        # print(f"    Selected IDs in get_panel_config: {selected_ids}")
 
         # 如果没有选择任何输出类型，也认为配置不完整 (可选，根据业务逻辑)
         if not any(current_event_outputs.values()):
-            print(f"DEBUG Panel ({self.get_friendly_source_name()}): No event output selected, returning empty config.")
+            # print(f"DEBUG Panel ({self.get_friendly_source_name()}): No event output selected, returning empty config.")
             return {} # 返回空字典，让主Tab判断配置无效
 
         join_override_sql = None
@@ -157,7 +153,7 @@ class MedicationConfigPanel(BaseSourceConfigPanel):
             "time_window_text": current_time_window,
             "cte_join_on_cohort_override": join_override_sql
         }
-        print(f"DEBUG Panel ({self.get_friendly_source_name()}): Returning panel_config: {config}")
+        # print(f"DEBUG Panel ({self.get_friendly_source_name()}): Returning panel_config: {config}")
         return config
 
     def clear_panel_state(self):
@@ -169,7 +165,7 @@ class MedicationConfigPanel(BaseSourceConfigPanel):
         self.time_window_widget.clear_selection()   # 这个会触发 time_window_changed
         # 上面两个 clear_selections 已经通过 _handle_logic_or_time_change 触发了 config_changed_signal.emit()
         # 所以下面的 emit() 可能不是必需的，但保留也无害，确保状态一致性。
-        self.config_changed_signal.emit()
+        # self.config_changed_signal.emit()
 
     def _on_item_selection_changed(self):
         count = len(self.item_list.selectedItems())

@@ -182,7 +182,7 @@ class CharteventsConfigPanel(BaseSourceConfigPanel):
         self.value_agg_widget.clear_selections()
         if self.time_window_widget.combo_box.count() > 0: # 确保有选项才设置
             self.time_window_widget.combo_box.setCurrentIndex(0) # 或者使用 clear_selection
-        self.config_changed_signal.emit()
+        # self.config_changed_signal.emit()
 
     def _on_item_selection_changed(self):
         count = len(self.item_list.selectedItems())

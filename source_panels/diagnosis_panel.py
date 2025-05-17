@@ -167,7 +167,7 @@ class DiagnosisConfigPanel(BaseSourceConfigPanel):
         self.filter_sql_preview_textedit.clear()
         self.event_output_widget.clear_selections()
         self.time_window_widget.clear_selection()
-        self.config_changed_signal.emit()
+        # self.config_changed_signal.emit()
 
     # _on_item_selection_changed, _filter_items_action, update_panel_action_buttons_state 与 ProcedureConfigPanel 类似
     def _on_item_selection_changed(self):
