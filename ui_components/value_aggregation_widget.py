@@ -6,26 +6,30 @@ from app_config import AGGREGATION_METHODS_DISPLAY # 导入配置
 class ValueAggregationWidget(QWidget):
     aggregation_changed = Signal()
 
-    NUMERIC_ONLY_METHODS = [
+    NUMERIC_ONLY_METHODS = [ # "MIN", "MAX" 从这里移除，因为它们对文本也有意义（字典序）
         "MEAN", "MEDIAN", "SUM", "STDDEV_SAMP", "VAR_SAMP",
-        "CV", "P25", "P75", "IQR", "RANGE","MIN", "MAX"
+        "CV", "P25", "P75", "IQR", "RANGE"
     ]
-    COUNT_METHOD_KEY = "COUNT"
+    # FIRST_VALUE, LAST_VALUE, COUNT, TIMESERIES_JSON, MIN, MAX 可以用于文本和数值
+
+    COUNT_METHOD_KEY = "COUNT" # 这个保持不变
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.agg_checkboxes = {}
-        self._block_aggregation_signal = False # 新增：用于在批量操作时临时阻塞信号发射
+        self._block_aggregation_signal = False
         self.init_ui()
 
-    def init_ui(self):
+    # init_ui, _emit_aggregation_changed_if_not_blocked, _select_all_methods, _deselect_all_methods,
+    # get_selected_methods, set_selected_methods, clear_selections 保持你之前修改后的版本即可。
+    # 关键是 set_text_mode 的调整：
+
+    def init_ui(self): # 确保这部分与你之前修改的一致
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(5)
 
-        # --- 全选/全不选按钮 ---
-        # 使用 QHBoxLayout 让按钮在一行显示
-        select_buttons_layout = QHBoxLayout() # 改为 QHBoxLayout
+        select_buttons_layout = QHBoxLayout()
         self.select_all_btn = QPushButton("全选")
         self.select_all_btn.clicked.connect(self._select_all_methods)
         select_buttons_layout.addWidget(self.select_all_btn)
@@ -34,27 +38,25 @@ class ValueAggregationWidget(QWidget):
         self.deselect_all_btn.clicked.connect(self._deselect_all_methods)
         select_buttons_layout.addWidget(self.deselect_all_btn)
         select_buttons_layout.addStretch()
-        main_layout.addLayout(select_buttons_layout) # 添加按钮布局
+        main_layout.addLayout(select_buttons_layout)
 
-        # --- 动态创建聚合选项复选框 ---
         checkbox_layout = QGridLayout()
         row, col = 0, 0
-        for display_name, internal_key in AGGREGATION_METHODS_DISPLAY:
+        for display_name, internal_key in AGGREGATION_METHODS_DISPLAY: # 使用 app_config 中的定义
             cb = QCheckBox(display_name)
-            # 修改连接，使其受 _block_aggregation_signal 控制
             cb.stateChanged.connect(self._emit_aggregation_changed_if_not_blocked)
             checkbox_layout.addWidget(cb, row, col, Qt.AlignmentFlag.AlignLeft)
             self.agg_checkboxes[internal_key] = cb
             
             col += 1
-            if col >= 4:  # 你提到的是每行四个选项
+            if col >= 4:
                 col = 0
                 row += 1
         
         main_layout.addLayout(checkbox_layout)
         self.setLayout(main_layout)
 
-    @Slot() # 这个槽函数用于接收来自 QCheckBox 的 stateChanged 信号
+    @Slot()
     def _emit_aggregation_changed_if_not_blocked(self):
         if not self._block_aggregation_signal:
             self.aggregation_changed.emit()
@@ -69,7 +71,6 @@ class ValueAggregationWidget(QWidget):
                     any_checkbox_state_actually_changed = True
         finally:
             self._block_aggregation_signal = False
-
         if any_checkbox_state_actually_changed:
             self.aggregation_changed.emit()
 
@@ -83,7 +84,6 @@ class ValueAggregationWidget(QWidget):
                     any_checkbox_state_actually_changed = True
         finally:
             self._block_aggregation_signal = False
-
         if any_checkbox_state_actually_changed:
             self.aggregation_changed.emit()
 
@@ -97,46 +97,41 @@ class ValueAggregationWidget(QWidget):
             for key, cb in self.agg_checkboxes.items():
                 new_state = methods_state.get(key, False)
                 if cb.isChecked() != new_state:
-                    # cb.blockSignals(True) # 不再需要，因为我们用 _block_aggregation_signal 控制
                     cb.setChecked(new_state)
-                    # cb.blockSignals(False)
-                    any_checkbox_state_actually_changed = True # 标记状态已改变
+                    any_checkbox_state_actually_changed = True
         finally:
             self._block_aggregation_signal = False
-        
         if any_checkbox_state_actually_changed:
-            self.aggregation_changed.emit() # 所有更改完成后发射一次信号
+            self.aggregation_changed.emit()
 
     def set_text_mode(self, is_text_mode: bool):
         self._block_aggregation_signal = True
         any_checkbox_state_actually_changed_due_to_text_mode = False
         try:
             for internal_key, cb in self.agg_checkboxes.items():
-                is_numeric_method = internal_key in self.NUMERIC_ONLY_METHODS
-                
-                original_checked_state = cb.isChecked() # 记录原始选中状态
+                is_strictly_numeric_method = internal_key in self.NUMERIC_ONLY_METHODS
+                original_checked_state = cb.isChecked()
 
-                if is_text_mode and is_numeric_method:
+                # 对于 "TIMESERIES_JSON", 它对文本和数值都有效，所以不受 is_text_mode 直接禁用
+                # MIN, MAX, FIRST_VALUE, LAST_VALUE, COUNT 对文本和数值也都有意义
+                if is_text_mode and is_strictly_numeric_method:
                     cb.setEnabled(False)
-                    if cb.isChecked(): 
-                        cb.setChecked(False) # 这会触发 stateChanged -> _emit_... 但被阻塞
+                    if cb.isChecked():
+                        cb.setChecked(False)
                 else:
-                    cb.setEnabled(True)
+                    cb.setEnabled(True) # 确保其他情况下（包括 TIMESERIES_JSON）是启用的
 
-                # 检查 setChecked(False) 是否真的改变了状态
-                if cb.isChecked() != original_checked_state: 
+                if cb.isChecked() != original_checked_state:
                     any_checkbox_state_actually_changed_due_to_text_mode = True
-
+                
+                # 更新 "Count" 的标签 (这部分逻辑保持)
                 if internal_key == self.COUNT_METHOD_KEY:
                     original_display_name_for_count = "计数 (Count)"
                     for disp, key_in_config in AGGREGATION_METHODS_DISPLAY:
                         if key_in_config == self.COUNT_METHOD_KEY:
                             original_display_name_for_count = disp
                             break
-                    if is_text_mode:
-                        cb.setText("文本计数 (Count Text)")
-                    else:
-                        cb.setText(original_display_name_for_count)
+                    cb.setText("文本计数 (Count Text)" if is_text_mode else original_display_name_for_count)
         finally:
             self._block_aggregation_signal = False
         
@@ -149,13 +144,10 @@ class ValueAggregationWidget(QWidget):
         try:
             for cb in self.agg_checkboxes.values():
                 if cb.isChecked():
-                    # cb.blockSignals(True) # 不再需要
                     cb.setChecked(False)
-                    # cb.blockSignals(False)
                     any_checkbox_state_actually_changed = True
         finally:
             self._block_aggregation_signal = False
-        
         if any_checkbox_state_actually_changed:
             self.aggregation_changed.emit()
 

@@ -279,6 +279,7 @@ class DataExportTab(QWidget):
         else:
             print(f"Preview specific table: Mismatch after programmatic selection. Expected: {schema_name}.{table_name}, Got: {self.selected_table_schema}.{self.selected_table_name}")
             QMessageBox.warning(self, "预览联动失败", f"无法自动选中表 '{schema_name}.{table_name}' 进行预览。\n当前选中: {self.selected_table_schema}.{self.selected_table_name}。请手动选择。")
+
     @Slot()
     def preview_data(self):
         print("--- preview_data called ---")
@@ -312,12 +313,20 @@ class DataExportTab(QWidget):
             for i in range(df.shape[0]):
                 for j in range(df.shape[1]):
                     value = df.iloc[i, j]
-                    self.result_table.setItem(i, j, QTableWidgetItem(str(value) if pd.notna(value) else ""))
+                    # Handle different types of values, especially for jsonb columns
+                    if isinstance(value, (list, dict)) or (hasattr(value, 'size') and hasattr(value, 'dtype')):
+                        # Handle array-like objects, lists, dicts, numpy arrays, etc.
+                        display_value = str(value)
+                    else:
+                        # Handle scalar values with standard pd.notna check
+                        display_value = str(value) if pd.notna(value) else ""
+                        
+                    self.result_table.setItem(i, j, QTableWidgetItem(display_value))
             self.result_table.resizeColumnsToContents()
 
             with conn.cursor() as cur:
-                 cur.execute(pgsql.SQL("SELECT COUNT(*) FROM {table}").format(table=table_identifier))
-                 total_rows = cur.fetchone()[0]
+                cur.execute(pgsql.SQL("SELECT COUNT(*) FROM {table}").format(table=table_identifier))
+                total_rows = cur.fetchone()[0]
             QMessageBox.information(self, "预览成功", f"表 {self.selected_table_schema}.{self.selected_table_name} (共 {total_rows} 行)\n"
                                                     f"已加载预览 {df.shape[0]} 行。")
         except Exception as e:

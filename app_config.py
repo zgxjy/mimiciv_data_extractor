@@ -54,7 +54,7 @@ AGGREGATION_METHODS_DISPLAY = [
     ("第75百分位数 (P75)", "P75"),
     ("四分位距 (IQR)", "IQR"),
     ("值域 (Range)", "RANGE"),
-    # ("众数 (Mode)", "MODE"), # 针对数值型 valuenum，众数意义不大，更适合分类文本
+    ("原始时间序列 (JSON)", "TIMESERIES_JSON"), #
 ]
 
 # 内部键对应的SQL聚合函数模板
@@ -76,7 +76,7 @@ SQL_AGGREGATES = {
     "P75": "PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY {val_col})",
     "IQR": "(PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY {val_col})) - (PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY {val_col}))",
     "RANGE": "MAX({val_col}) - MIN({val_col})",
-    # "MODE": "MODE() WITHIN GROUP (ORDER BY {val_col})",
+    "TIMESERIES_JSON": "JSONB_AGG(JSONB_BUILD_OBJECT('time', {time_col}, 'value', {val_col}) ORDER BY {time_col} ASC NULLS LAST)", # <-- 新增
 }
 
 # 内部键对应的SQL结果列类型 (用于 ALTER TABLE ADD COLUMN)
@@ -96,7 +96,7 @@ AGGREGATE_RESULT_TYPES = {
     "P75": "DOUBLE PRECISION",
     "IQR": "DOUBLE PRECISION",
     "RANGE": "NUMERIC",        # 结果类型依赖于 MIN/MAX
-    # "MODE": "TEXT", # 假设 MODE() 返回的类型与输入列相同
+    "TIMESERIES_JSON": "JSONB", # <-- 新增
 }
 # 注意: 对于 MIN, MAX, FIRST_VALUE, LAST_VALUE, RANGE，如果原始列是文本 (value)，
 # 则结果类型应为 TEXT。这需要在 sql_builder_special.py 中根据 is_text_extraction 动态调整。

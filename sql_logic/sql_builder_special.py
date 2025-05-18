@@ -165,40 +165,31 @@ def build_special_data_sql(
         return None, "未能构建任何有效的提取列。", params_for_cte, generated_column_details_for_preview
 
     aggregated_columns_sql_list = []
-    fe_val_ident_in_cte = pgsql.Identifier("event_value") 
-    fe_time_ident_in_cte = pgsql.Identifier("event_time") 
-    cte_hadm_id_for_grouping = pgsql.Identifier("hadm_id_cohort")
+    fe_val_ident_in_cte = pgsql.Identifier("event_value") # 来自 FilteredEvents CTE
+    fe_time_ident_in_cte = pgsql.Identifier("event_time") # 来自 FilteredEvents CTE
+    cte_hadm_id_for_grouping = pgsql.Identifier("hadm_id_cohort") # 或者 stay_id，取决于 join
 
-    # --- START OF CRITICAL MODIFICATION ---
     for _, final_col_ident, agg_sql_template_str, _ in selected_methods_details:
         params_for_template_format = {}
         
-        # Determine the actual expression for {val_col}
-        actual_value_expression_for_template = fe_val_ident_in_cte # Default to the direct column from CTE
-        if is_text_extraction:
-            # For text extraction, if the template is not COUNT(*) and doesn't already handle text (e.g. LOWER),
-            # we wrap the 'event_value' (which is chartevents.value) with CAST AS TEXT.
-            if agg_sql_template_str.upper() != "COUNT(*)" and \
-               not any(func in agg_sql_template_str.upper() for func in ["CAST(", "LOWER(", "UPPER("]):
-                actual_value_expression_for_template = pgsql.SQL("CAST({} AS TEXT)").format(fe_val_ident_in_cte)
-        
-        # Populate parameters for .format()
+        # 对于 {val_col}: 使用 fe_val_ident_in_cte。JSONB_BUILD_OBJECT 会处理类型。
         if "{val_col}" in agg_sql_template_str:
-            if not value_column_name_from_panel: # Should have been caught earlier
+            if not value_column_name_from_panel: # 早期的检查应该已经捕获了这个
                 return None, f"聚合模板 '{agg_sql_template_str}' 需要值列，但未配置。", params_for_cte, []
-            params_for_template_format['val_col'] = actual_value_expression_for_template
+            params_for_template_format['val_col'] = fe_val_ident_in_cte # 直接使用来自CTE的列
         
+        # 对于 {time_col}: 使用 fe_time_ident_in_cte
         if "{time_col}" in agg_sql_template_str:
-            if not time_col_for_window: # Should have been caught earlier
+            if not time_col_for_window: # 早期的检查应该已经捕获了这个
                 return None, f"聚合模板 '{agg_sql_template_str}' 需要时间列，但未配置。", params_for_cte, []
             params_for_template_format['time_col'] = fe_time_ident_in_cte
-            
-        # Build the SQL expression using SQL.format for proper object handling
-        if agg_sql_template_str.upper() == "COUNT(*)": # COUNT(*) template has no placeholders
+
+        # 构建 SQL 表达式
+        if agg_sql_template_str.upper() == "COUNT(*)": # 特殊处理 COUNT(*)
             sql_expr_for_select = pgsql.SQL("COUNT(*)")
         else:
-            # Check if all placeholders in template are covered by params_for_template_format
-            # This is a bit manual, but ensures robustness for defined templates
+            # 确保所有模板中的占位符都有对应的参数
+            # (这部分逻辑你已经有了，保持即可)
             template_placeholders = []
             if "{val_col}" in agg_sql_template_str: template_placeholders.append("val_col")
             if "{time_col}" in agg_sql_template_str: template_placeholders.append("time_col")
@@ -209,7 +200,7 @@ def build_special_data_sql(
 
             try:
                 sql_expr_for_select = pgsql.SQL(agg_sql_template_str).format(**params_for_template_format)
-            except KeyError as e: # Should be caught by missing_keys_in_params check now
+            except KeyError as e:
                  return None, f"格式化聚合模板 '{agg_sql_template_str}' 时出错: 占位符 {e} 未提供。", params_for_cte, []
         
         aggregated_columns_sql_list.append(pgsql.SQL("{} AS {}").format(sql_expr_for_select, final_col_ident))
