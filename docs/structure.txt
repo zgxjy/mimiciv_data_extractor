@@ -1,0 +1,59 @@
+mimiciv_data_extractor/
+│
+├── [核心文件]
+│   ├── medical_data_extractor.py      # 主程序入口
+│   ├── app_config.py                 # 应用配置
+│   └── utils.py                     # 工具函数
+│
+├── [资源文件]
+│   └── assets/
+│       └── icons/
+│           └── icon.ico             # 应用图标
+│
+├── [文档]
+│   ├── docs/
+│   │   ├── PACKAGING.md            # 打包说明
+│   │   ├── README.md               # 项目说明文档
+│   │   └── todo.md                 # 待办事项
+│
+├── [测试]
+│   ├── tests/
+│   │   ├── __init__.py
+│   │   ├── test_sql_builder_special.py  # SQL构建器测试
+│   │   └── test_utils.py                # 工具函数测试
+│
+├── [SQL逻辑]
+│   └── sql_logic/
+│       ├── __init__.py
+│       ├── base_info_sql.py        # 基础SQL查询
+│       └── sql_builder_special.py  # 特殊SQL构建器
+│
+├── [标签页]
+│   └── tabs/
+│       ├── __init__.py
+│       ├── tab_combine_base_info.py    # 基础数据合并标签页
+│       ├── tab_connection.py          # 数据库连接标签页
+│       ├── tab_data_dictionary.py     # 数据字典标签页
+│       ├── tab_data_export.py         # 数据导出标签页
+│       ├── tab_query_cohort.py        # 队列查询标签页
+│       ├── tab_special_data_master.py # 特殊数据主控标签页
+│       └── tab_structure.py           # 数据库结构标签页
+│
+├── [源面板]
+│   └── source_panels/
+│       ├── __init__.py
+│       ├── base_panel.py             # 基础面板类
+│       ├── chartevents_panel.py      # 图表事件面板
+│       ├── diagnosis_panel.py        # 诊断面板
+│       ├── labevents_panel.py        # 实验室事件面板
+│       ├── medication_panel.py       # 药物面板
+│       └── procedure_panel.py        # 程序面板
+│
+└── [UI组件]
+    └── ui_components/
+        ├── __init__.py
+        ├── conditiongroup.py            # 条件组组件
+        ├── event_output_widget.py       # 事件输出组件
+        ├── time_window_selector_widget.py  # 时间窗口选择器
+        ├── value_aggregation_widget.py     # 值聚合组件
+        └── value_aggregation_widget copy.py  # 值聚合组件备份
