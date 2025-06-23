@@ -12,7 +12,7 @@ from tabs.tab_combine_base_info import BaseInfoDataExtractionTab
 from tabs.tab_special_data_master import SpecialDataMasterTab # 导入新的主专项数据Tab
 from tabs.tab_data_dictionary import DataDictionaryTab     # <-- 新增导入
 from tabs.tab_data_export import DataExportTab
-
+from tabs.tab_data_merge import DataMergeTab # <-- 新增导入数据合并Tab
 
 class MedicalDataExtractor(QMainWindow):
     def __init__(self):
@@ -35,6 +35,7 @@ class MedicalDataExtractor(QMainWindow):
         self.data_extraction_tab = BaseInfoDataExtractionTab(self.get_db_params)
         self.special_data_master_tab = SpecialDataMasterTab(self.get_db_params) # 实例化新的
         self.data_export_tab = DataExportTab(self.get_db_params)
+        self.data_merge_tab = DataMergeTab() # <-- 实例化数据合并Tab
 
         # Add tabs (调整顺序，将字典查看器放在结构查看后)
         self.tabs.addTab(self.connection_tab, "1. 数据库连接")         # Index 0
@@ -44,6 +45,7 @@ class MedicalDataExtractor(QMainWindow):
         self.tabs.addTab(self.data_extraction_tab, "3. 添加基础数据") # Index 4
         self.tabs.addTab(self.special_data_master_tab, "4. 添加专项数据")     # Index 5
         self.tabs.addTab(self.data_export_tab, "5. 数据预览与导出")     # Index 6
+        self.tabs.addTab(self.data_merge_tab, "6. 数据合并")     # Index 7
 
         # --- Signal Connections ---
         self.connection_tab.connected_signal.connect(self.on_db_connected)
