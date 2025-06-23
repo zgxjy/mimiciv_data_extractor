@@ -3,5 +3,4 @@ psycopg2-binary
 pandas
 openpyxl
 re
-sqlalchemy
-chardet 
+sqlalchemy 
